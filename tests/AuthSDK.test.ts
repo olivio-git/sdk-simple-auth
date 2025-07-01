@@ -20,9 +20,9 @@ describe('AuthSDK', () => {
 
   test('should login successfully', async () => {
     const mockResponse = {
-      access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-      refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-      user: { id: '6863062f0d86a4ac0811fa2e', email: 'user@example.com' },
+      access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDMxNTUsImV4cCI6MTc1MTM0NDA1NX0.GESTM_e0HOtYjMgmbUaz8eqkiAcWmx9rtw9VC79BxAs',
+      refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDMxNTUsImV4cCI6MTc1MTk0Nzk1NX0.3uzdrZnnrQHuQ12_VUAtiBjrxq7LakD3-rdm60jS0D8',
+      user: { id: '686360237fbca4d084246cfc', email: 'user@example.com' },
     };
 
     (fetch as jest.Mock).mockResolvedValueOnce({
@@ -32,7 +32,7 @@ describe('AuthSDK', () => {
 
     const user = await authSDK.login({
       email: 'user@example.com',
-      password: 'userexample12',
+      password: 'user123',
     });
 
     expect(user).toEqual(mockResponse.user);
