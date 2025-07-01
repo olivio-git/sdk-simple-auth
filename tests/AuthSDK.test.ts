@@ -32,7 +32,7 @@ describe('AuthSDK', () => {
 
     const user = await authSDK.login({
       email: 'user@example.com',
-      password: 'olivio12',
+      password: 'userexample12',
     });
 
     expect(user).toEqual(mockResponse.user);
