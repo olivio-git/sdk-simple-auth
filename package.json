@@ -9,13 +9,13 @@
     "simple",
     "typescript"
   ],
-  "homepage": "https://github.com/olivio-git/UPDS_PROYECT_MICROSERVICES#readme",
+  "homepage": "https://github.com/olivio-git/sdk-simple-auth.git#readme",
   "bugs": {
-    "url": "https://github.com/olivio-git/UPDS_PROYECT_MICROSERVICES/issues"
+    "url": "https://github.com/olivio-git/sdk-simple-auth.git/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/olivio-git/UPDS_PROYECT_MICROSERVICES.git"
+    "url": "git+https://github.com/olivio-git/sdk-simple-auth.git.git"
   },
   "license": "MIT",
   "author": "olivio-git",
