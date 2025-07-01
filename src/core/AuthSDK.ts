@@ -1,5 +1,8 @@
 import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient, LoginCredentials, RegisterData } from '../types';
 
+// Tipo para el callback de suscripción
+type StateChangeListener = (state: AuthState) => void;
+
 class AuthSDK {
   private config: Required<AuthConfig>;
   private state: AuthState;
@@ -7,6 +10,9 @@ class AuthSDK {
   private refreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing = false;
   private refreshPromise: Promise<AuthTokens> | null = null;
+  
+  // Array para almacenar los listeners de cambio de estado
+  private stateChangeListeners: StateChangeListener[] = [];
 
   constructor(config: AuthConfig, callbacks?: AuthCallbacks) {
     // Configuración por defecto
@@ -48,6 +54,23 @@ class AuthSDK {
 
     // Inicializar desde storage
     this.initializeFromStorage();
+  }
+
+  // NUEVO MÉTODO: Suscribirse a cambios de estado
+  public onAuthStateChanged(listener: StateChangeListener): () => void {
+    // Agregar el listener al array
+    this.stateChangeListeners.push(listener);
+    
+    // Llamar inmediatamente con el estado actual
+    listener(this.getState());
+    
+    // Retornar función para cancelar la suscripción
+    return () => {
+      const index = this.stateChangeListeners.indexOf(listener);
+      if (index > -1) {
+        this.stateChangeListeners.splice(index, 1);
+      }
+    };
   }
 
   // Cliente HTTP por defecto usando fetch
@@ -514,12 +537,23 @@ class AuthSDK {
     this.notifyStateChange();
   }
 
+  // MÉTODO ACTUALIZADO: Notificar cambios a todos los listeners
   private notifyStateChange(): void {
-    this.callbacks.onAuthStateChanged?.(this.getState());
+    const currentState = this.getState();
+    
+    // Notificar a los callbacks tradicionales
+    this.callbacks.onAuthStateChanged?.(currentState);
+    
+    // Notificar a todos los listeners suscritos
+    this.stateChangeListeners.forEach(listener => {
+      try {
+        listener(currentState);
+      } catch (error) {
+        console.error('Error in state change listener:', error);
+      }
+    });
   }
 }
-
-// Hook para React
 
 export { AuthSDK };
 export type { AuthConfig, AuthState, AuthUser, AuthTokens, LoginCredentials, RegisterData };

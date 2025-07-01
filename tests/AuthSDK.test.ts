@@ -20,8 +20,8 @@ describe('AuthSDK', () => {
 
   test('should login successfully', async () => {
     const mockResponse = {
-      access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDMxNTUsImV4cCI6MTc1MTM0NDA1NX0.GESTM_e0HOtYjMgmbUaz8eqkiAcWmx9rtw9VC79BxAs',
-      refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDMxNTUsImV4cCI6MTc1MTk0Nzk1NX0.3uzdrZnnrQHuQ12_VUAtiBjrxq7LakD3-rdm60jS0D8',
+      access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDU1NTUsImV4cCI6MTc1MTM0NjQ1NX0.jTTcENp_nYQ2Ts-FndYraBbt_mWXvhAn3tfKLx5HP6I',
+      refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTEzNDU1NTUsImV4cCI6MTc1MTk1MDM1NX0.kpBjHHvIZbdfUWIxDVIPwSqcEgg0u0Sf5UguubttY-4',
       user: { id: '686360237fbca4d084246cfc', email: 'user@example.com' },
     };
 
