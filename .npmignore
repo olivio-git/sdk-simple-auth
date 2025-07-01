@@ -1,0 +1,12 @@
+src/
+tests/
+examples/
+docs/
+.gitignore
+.eslintrc.js
+jest.config.js
+rollup.config.js
+tsconfig.json
+*.log
+coverage/
+.nyc_output/
