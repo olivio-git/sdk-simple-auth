@@ -636,7 +636,7 @@ If you encounter any issues, please file them on our [GitHub Issues](https://git
 
 ## 📖 Changelog
 
-### v1.1.3
+### v1.1.0
 - Added `onAuthStateChanged` method for state subscriptions
 - Added `useAuth` React hook for seamless React integration
 - Added flexible storage adapters (localStorage and IndexedDB)
@@ -644,7 +644,7 @@ If you encounter any issues, please file them on our [GitHub Issues](https://git
 - Improved state management and synchronization
 - Enhanced TypeScript support
 
-### v1.0.0
+### v1.0.3
 - Initial release
 - Complete authentication flow
 - Automatic token refresh
