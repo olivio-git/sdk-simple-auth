@@ -8,6 +8,10 @@ export interface AuthConfig {
     profile?: string;
   };
   storage?: {
+    type?: 'localStorage' | 'indexedDB';
+    dbName?: string;
+    dbVersion?: number;
+    storeName?: string;
     tokenKey?: string;
     refreshTokenKey?: string;
     userKey?: string;

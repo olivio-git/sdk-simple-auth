@@ -1,3 +1,6 @@
+import { IndexedDBAdapter } from '../storage/IndexedDBAdapter';
+import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
+import { StorageAdapter } from '../storage/StorageAdapter';
 import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient, LoginCredentials, RegisterData } from '../types';
 
 // Tipo para el callback de suscripción
@@ -10,6 +13,7 @@ class AuthSDK {
   private refreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing = false;
   private refreshPromise: Promise<AuthTokens> | null = null;
+  private storageAdapter: StorageAdapter;
   
   // Array para almacenar los listeners de cambio de estado
   private stateChangeListeners: StateChangeListener[] = [];
@@ -27,6 +31,10 @@ class AuthSDK {
         ...config.endpoints,
       },
       storage: {
+        type: 'indexedDB',
+        dbName: 'AuthSDK',
+        dbVersion: 1,
+        storeName: 'auth_data',
         tokenKey: 'auth_access_token',
         refreshTokenKey: 'auth_refresh_token',
         userKey: 'auth_user',
@@ -43,6 +51,9 @@ class AuthSDK {
 
     this.callbacks = callbacks || {};
 
+    // Inicializar el adaptador de storage
+    this.storageAdapter = this.createStorageAdapter();
+
     // Estado inicial
     this.state = {
       isAuthenticated: false,
@@ -54,6 +65,20 @@ class AuthSDK {
 
     // Inicializar desde storage
     this.initializeFromStorage();
+  }
+
+  private createStorageAdapter(): StorageAdapter {
+    const storageType = this.config.storage.type || 'indexedDB';
+    
+    if (storageType === 'localStorage') {
+      return new LocalStorageAdapter();
+    } else {
+      return new IndexedDBAdapter(
+        this.config.storage.dbName,
+        this.config.storage.dbVersion,
+        this.config.storage.storeName
+      );
+    }
   }
 
   // NUEVO MÉTODO: Suscribirse a cambios de estado
@@ -152,11 +177,11 @@ class AuthSDK {
     };
   }
 
-  // Inicializar desde localStorage
-  private initializeFromStorage(): void {
+  // Inicializar desde storage
+  private async initializeFromStorage(): Promise<void> {
     try {
-      const storedTokens = this.getStoredTokens();
-      const storedUser = this.getStoredUser();
+      const storedTokens = await this.getStoredTokens();
+      const storedUser = await this.getStoredUser();
 
       if (storedTokens && storedUser && this.isTokenValid(storedTokens.accessToken)) {
         this.state = {
@@ -167,18 +192,18 @@ class AuthSDK {
           error: null,
         };
 
-        // Programar refresh automático
-        if (this.config.tokenRefresh.enabled) {
+        // Programar refresh automático solo si está habilitado
+        if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
           this.scheduleTokenRefresh(storedTokens.accessToken);
         }
 
         this.notifyStateChange();
       } else {
-        this.clearStorage();
+        await this.clearStorage();
       }
     } catch (error) {
       console.error('Error initializing from storage:', error);
-      this.clearStorage();
+      await this.clearStorage();
     }
   }
 
@@ -189,8 +214,7 @@ class AuthSDK {
 
     try {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.login}`;
-      const response = await this.config.httpClient.post(url, credentials);
-
+      const response = await this.config.httpClient.post(url, credentials); 
       const tokens: AuthTokens = {
         accessToken: response.access_token || response.accessToken,
         refreshToken: response.refresh_token || response.refreshToken,
@@ -199,10 +223,10 @@ class AuthSDK {
       };
 
       const user: AuthUser = response.user || this.parseTokenPayload(tokens.accessToken);
-
+      
       // Guardar en storage
-      this.storeTokens(tokens);
-      this.storeUser(user);
+      await this.storeTokens(tokens);
+      await this.storeUser(user);
 
       // Actualizar estado
       this.state = {
@@ -213,8 +237,8 @@ class AuthSDK {
         error: null,
       };
 
-      // Programar refresh automático
-      if (this.config.tokenRefresh.enabled) {
+      // Programar refresh automático solo si está habilitado y hay refresh token
+      if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
         this.scheduleTokenRefresh(tokens.accessToken);
       }
 
@@ -251,8 +275,8 @@ class AuthSDK {
 
         const user: AuthUser = response.user || this.parseTokenPayload(tokens.accessToken);
 
-        this.storeTokens(tokens);
-        this.storeUser(user);
+        await this.storeTokens(tokens);
+        await this.storeUser(user);
 
         this.state = {
           isAuthenticated: true,
@@ -262,7 +286,8 @@ class AuthSDK {
           error: null,
         };
 
-        if (this.config.tokenRefresh.enabled) {
+        // Programar refresh automático solo si está habilitado y hay refresh token
+        if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
           this.scheduleTokenRefresh(tokens.accessToken);
         }
 
@@ -294,11 +319,12 @@ class AuthSDK {
           },
         }).catch(() => {
           // Ignorar errores del servidor en logout
+          // pero continuar con el logout local
         });
       }
     } finally {
       // Limpiar estado local siempre
-      this.clearStorage();
+      await this.clearStorage();
       this.clearRefreshTimer();
 
       this.state = {
@@ -315,6 +341,11 @@ class AuthSDK {
   }
 
   public async refreshTokens(): Promise<AuthTokens> {
+    // Si el refresh de tokens está deshabilitado, lanzar error
+    if (!this.config.tokenRefresh.enabled) {
+      throw new Error('Token refresh is disabled');
+    }
+
     // Evitar múltiples refreshes simultáneos
     if (this.isRefreshing && this.refreshPromise) {
       return this.refreshPromise;
@@ -353,10 +384,10 @@ class AuthSDK {
       };
 
       // Actualizar storage y estado
-      this.storeTokens(tokens);
+      await this.storeTokens(tokens);
       this.state.tokens = tokens;
 
-      // Programar próximo refresh
+      // Programar próximo refresh solo si está habilitado
       if (this.config.tokenRefresh.enabled) {
         this.scheduleTokenRefresh(tokens.accessToken);
       }
@@ -385,6 +416,10 @@ class AuthSDK {
     return this.state.tokens?.accessToken || null;
   }
 
+  public getRefreshToken(): string | null {
+    return this.state.tokens?.refreshToken || null;
+  }
+
   public isAuthenticated(): boolean {
     return this.state.isAuthenticated && this.isTokenValid(this.state.tokens?.accessToken);
   }
@@ -394,8 +429,13 @@ class AuthSDK {
       return null;
     }
 
-    // Si el token está próximo a expirar, refrescarlo
-    if (this.shouldRefreshToken(this.state.tokens.accessToken)) {
+    // Si el refresh está deshabilitado, solo devolver el token actual si es válido
+    if (!this.config.tokenRefresh.enabled) {
+      return this.isTokenValid(this.state.tokens.accessToken) ? this.state.tokens.accessToken : null;
+    }
+
+    // Si el token está próximo a expirar y hay refresh token, refrescarlo
+    if (this.shouldRefreshToken(this.state.tokens.accessToken) && this.state.tokens.refreshToken) {
       try {
         const tokens = await this.refreshTokens();
         return tokens.accessToken;
@@ -433,6 +473,10 @@ class AuthSDK {
   }
 
   private shouldRefreshToken(token: string): boolean {
+    if (!this.config.tokenRefresh.enabled) {
+      return false;
+    }
+
     try {
       const payload = this.parseTokenPayload(token);
       const now = Math.floor(Date.now() / 1000);
@@ -449,6 +493,11 @@ class AuthSDK {
   }
 
   private scheduleTokenRefresh(token: string): void {
+    // Solo programar refresh si está habilitado
+    if (!this.config.tokenRefresh.enabled) {
+      return;
+    }
+
     this.clearRefreshTimer();
 
     try {
@@ -473,26 +522,30 @@ class AuthSDK {
     }
   }
 
-  // Métodos de storage
-  private storeTokens(tokens: AuthTokens): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(this.config.storage.tokenKey || '', tokens.accessToken || '');
+  // Métodos de storage actualizados para usar el adaptador
+  private async storeTokens(tokens: AuthTokens): Promise<void> {
+    try {
+      await this.storageAdapter.setItem(this.config.storage.tokenKey || '', tokens.accessToken || '');
       if (tokens.refreshToken) {
-        localStorage.setItem(this.config.storage.refreshTokenKey || '', tokens.refreshToken);
+        await this.storageAdapter.setItem(this.config.storage.refreshTokenKey || '', tokens.refreshToken);
       }
+    } catch (error) {
+      console.error('Error storing tokens:', error);
     }
   }
 
-  private storeUser(user: AuthUser): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(this.config.storage.userKey || '', JSON.stringify(user));
+  private async storeUser(user: AuthUser): Promise<void> {
+    try {
+      await this.storageAdapter.setItem(this.config.storage.userKey || '', JSON.stringify(user));
+    } catch (error) {
+      console.error('Error storing user:', error);
     }
   }
 
-  private getStoredTokens(): AuthTokens | null {
-    if (typeof window !== 'undefined') {
-      const accessToken = localStorage.getItem(this.config.storage.tokenKey || '');
-      const refreshToken = localStorage.getItem(this.config.storage.refreshTokenKey || '');
+  private async getStoredTokens(): Promise<AuthTokens | null> {
+    try {
+      const accessToken = await this.storageAdapter.getItem(this.config.storage.tokenKey || '');
+      const refreshToken = await this.storageAdapter.getItem(this.config.storage.refreshTokenKey || '');
 
       if (accessToken) {
         return {
@@ -500,13 +553,15 @@ class AuthSDK {
           refreshToken: refreshToken || undefined,
         };
       }
+    } catch (error) {
+      console.error('Error getting stored tokens:', error);
     }
     return null;
   }
 
-  private getStoredUser(): AuthUser | null {
-    if (typeof window !== 'undefined') {
-      const userData = localStorage.getItem(this.config.storage.userKey || '');
+  private async getStoredUser(): Promise<AuthUser | null> {
+    try {
+      const userData = await this.storageAdapter.getItem(this.config.storage.userKey || '');
       if (userData) {
         try {
           return JSON.parse(userData);
@@ -514,15 +569,19 @@ class AuthSDK {
           return null;
         }
       }
+    } catch (error) {
+      console.error('Error getting stored user:', error);
     }
     return null;
   }
 
-  private clearStorage(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(this.config.storage.tokenKey || '');
-      localStorage.removeItem(this.config.storage.refreshTokenKey || '');
-      localStorage.removeItem(this.config.storage.userKey || '');
+  private async clearStorage(): Promise<void> {
+    try {
+      await this.storageAdapter.removeItem(this.config.storage.tokenKey || '');
+      await this.storageAdapter.removeItem(this.config.storage.refreshTokenKey || '');
+      await this.storageAdapter.removeItem(this.config.storage.userKey || '');
+    } catch (error) {
+      console.error('Error clearing storage:', error);
     }
   }
 

@@ -6,24 +6,13 @@ export function useAuth(authSDK: AuthSDK) {
   const [authState, setAuthState] = useState<AuthState>(authSDK.getState());
 
   useEffect(() => {
-    // Suscribirse a cambios de estado
-    const unsubscribe = (newState: AuthState) => {
+    // Suscribirse a cambios de estado usando el nuevo método
+    const unsubscribe = authSDK.onAuthStateChanged((newState: AuthState) => {
       setAuthState(newState);
-    };
+    });
 
-    // Configurar callback
-    const currentCallbacks = authSDK['callbacks'];
-    const originalCallback = currentCallbacks.onAuthStateChanged;
-    
-    currentCallbacks.onAuthStateChanged = (state) => {
-      unsubscribe(state);
-      originalCallback?.(state);
-    };
-
-    // Cleanup
-    return () => {
-      currentCallbacks.onAuthStateChanged = originalCallback;
-    };
+    // Cleanup: cancelar suscripción
+    return unsubscribe;
   }, [authSDK]);
 
   const login = useCallback(
@@ -44,11 +33,21 @@ export function useAuth(authSDK: AuthSDK) {
     return authSDK.logout();
   }, [authSDK]);
 
+  const refreshTokens = useCallback(async () => {
+    try {
+      return await authSDK.refreshTokens();
+    } catch (error) {
+      console.error('Error refreshing tokens:', error);
+      throw error;
+    }
+  }, [authSDK]);
+
   return {
     ...authState,
     login,
     register,
     logout,
+    refreshTokens,
     getAuthHeaders: authSDK.getAuthHeaders.bind(authSDK),
     getValidAccessToken: authSDK.getValidAccessToken.bind(authSDK),
   };
