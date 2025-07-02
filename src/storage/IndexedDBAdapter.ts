@@ -11,7 +11,7 @@ export class IndexedDBAdapter implements StorageAdapter {
     this.dbVersion = dbVersion;
     this.storeName = storeName;
   }
-
+ 
   private async openDB(): Promise<IDBDatabase> {
     if (this.db) {
       return this.db;

@@ -5,7 +5,7 @@ import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient,
 
 // Tipo para el callback de suscripción
 type StateChangeListener = (state: AuthState) => void;
-
+ 
 class AuthSDK {
   private config: Required<AuthConfig>;
   private state: AuthState;

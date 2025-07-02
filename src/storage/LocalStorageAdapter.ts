@@ -13,7 +13,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     }
     return null;
   }
-
+ 
   async removeItem(key: string): Promise<void> {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(key);

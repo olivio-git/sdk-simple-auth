@@ -21,7 +21,7 @@ export function useAuth(authSDK: AuthSDK) {
     },
     [authSDK]
   );
-
+ 
   const register = useCallback(
     async (userData: RegisterData) => {
       return authSDK.register(userData);

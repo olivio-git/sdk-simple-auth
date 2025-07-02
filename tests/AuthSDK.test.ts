@@ -97,14 +97,14 @@ describe('AuthSDK', () => {
       refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2ODYzNjAyMzdmYmNhNGQwODQyNDZjZmMiLCJpYXQiOjE3NTE0ODE4NDMsImV4cCI6MTc1MjA4NjY0M30.SQZOWei3IL0ivHHiS9T0vHn9xQQPv2Pci2ZHEzt0BKc',
       user: { email: 'user@example.com' },
     }; 
-
+ 
     (fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponseLogin,
     });
     await login({ email: 'user@example.com', password: 'user123' });
     expect(authSDK.getCurrentUser()?.email).toEqual('user@example.com');
-    
+
     await authSDK.logout();
     expect(authSDK.isAuthenticated()).toBe(false);
     expect(authSDK.getCurrentUser()).toBeNull();

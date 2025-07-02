@@ -23,7 +23,7 @@ export interface AuthConfig {
   };
   httpClient?: HttpClient;
 }
-
+ 
 export interface HttpClient {
   post(url: string, data?: any, config?: any): Promise<any>;
   get(url: string, config?: any): Promise<any>;
