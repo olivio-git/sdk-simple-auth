@@ -9,18 +9,19 @@
 ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═════╝ ╚═╝  ╚═╝
 ```
 
-A comprehensive, lightweight authentication SDK for modern web applications with automatic token refresh, TypeScript support, and React integration.
+A comprehensive, lightweight authentication SDK for modern web applications with automatic token refresh, TypeScript support, React integration, and flexible storage options.
 
 ## 🚀 Features
 
 - **🔐 Complete Authentication Flow**: Login, register, logout, and profile management
 - **🔄 Automatic Token Refresh**: Smart token renewal with configurable buffer time
-- **💾 Persistent Storage**: Automatic localStorage integration with customizable keys
+- **💾 Flexible Storage**: Support for both localStorage and IndexedDB with custom adapters
 - **⚡ React Integration**: Built-in React hooks for seamless state management
 - **🛡️ TypeScript Support**: Fully typed for better developer experience
 - **🔧 Configurable**: Flexible configuration for different backend implementations
 - **📦 Lightweight**: Minimal dependencies, maximum performance
 - **🌐 Universal**: Works in browser and Node.js environments
+- **🎯 State Management**: Observable state changes with subscription support
 
 ## 📦 Installation
 
@@ -44,7 +45,10 @@ pnpm add sdk-simple-auth
 import { AuthSDK } from 'sdk-simple-auth';
 
 const authSDK = new AuthSDK({
-  authServiceUrl: 'https://your-api.com'
+  authServiceUrl: 'https://your-api.com',
+  storage: {
+    type: 'localStorage', // or 'indexedDB'
+  }
 });
 
 // Login
@@ -59,37 +63,49 @@ const isAuthenticated = authSDK.isAuthenticated();
 // Get current user
 const currentUser = authSDK.getCurrentUser();
 
+// Subscribe to auth state changes
+const unsubscribe = authSDK.onAuthStateChanged((state) => {
+  console.log('Auth state changed:', state);
+});
+
 // Logout
 await authSDK.logout();
 ```
 
-### React Integration
+### React Integration with useAuth Hook
 
 ```jsx
 import React from 'react';
-import { AuthSDK } from 'sdk-simple-auth';
+import { AuthSDK, useAuth } from 'sdk-simple-auth';
 
 const authSDK = new AuthSDK({
-  authServiceUrl: 'https://your-api.com'
+  authServiceUrl: 'https://your-api.com',
+  storage: {
+    type: 'localStorage',
+  }
 });
 
+function AuthProvider({ children }) {
+  return (
+    <AuthContext.Provider value={authSDK}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
 function LoginComponent() {
-  const [user, setUser] = React.useState(authSDK.getCurrentUser());
-  const [loading, setLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    // Listen to auth state changes
-    const unsubscribe = authSDK.onAuthStateChanged((state) => {
-      setUser(state.user);
-      setLoading(state.loading);
-    });
-
-    return unsubscribe;
-  }, []);
+  const {
+    isAuthenticated,
+    user,
+    loading,
+    error,
+    login,
+    logout
+  } = useAuth(authSDK);
 
   const handleLogin = async () => {
     try {
-      await authSDK.login({
+      await login({
         email: 'user@example.com',
         password: 'password123'
       });
@@ -100,8 +116,11 @@ function LoginComponent() {
 
   if (loading) return <div>Loading...</div>;
   
-  return user ? (
-    <div>Welcome, {user.email}!</div>
+  return isAuthenticated ? (
+    <div>
+      <p>Welcome, {user?.email}!</p>
+      <button onClick={logout}>Logout</button>
+    </div>
   ) : (
     <button onClick={handleLogin}>Login</button>
   );
@@ -128,9 +147,15 @@ const authSDK = new AuthSDK({
   
   // Optional: Storage configuration
   storage: {
-    tokenKey: 'auth_access_token',       // localStorage key for access token
-    refreshTokenKey: 'auth_refresh_token', // localStorage key for refresh token
-    userKey: 'auth_user'                 // localStorage key for user data
+    type: 'localStorage',               // 'localStorage' or 'indexedDB'
+    // IndexedDB specific options
+    dbName: 'AuthSDK',                  // IndexedDB database name
+    dbVersion: 1,                       // IndexedDB database version
+    storeName: 'auth_data',             // IndexedDB store name
+    // Storage keys for both localStorage and IndexedDB
+    tokenKey: 'auth_access_token',      // Key for access token
+    refreshTokenKey: 'auth_refresh_token', // Key for refresh token
+    userKey: 'auth_user'                // Key for user data
   },
   
   // Optional: Token refresh configuration
@@ -162,12 +187,45 @@ const authSDK = new AuthSDK({
 });
 ```
 
+### Storage Adapters
+
+The SDK supports two storage adapters:
+
+#### LocalStorage Adapter (Default)
+```javascript
+const authSDK = new AuthSDK({
+  authServiceUrl: 'https://your-api.com',
+  storage: {
+    type: 'localStorage',
+    tokenKey: 'my_access_token',
+    refreshTokenKey: 'my_refresh_token',
+    userKey: 'my_user_data'
+  }
+});
+```
+
+#### IndexedDB Adapter
+```javascript
+const authSDK = new AuthSDK({
+  authServiceUrl: 'https://your-api.com',
+  storage: {
+    type: 'indexedDB',
+    dbName: 'MyAppAuth',
+    dbVersion: 1,
+    storeName: 'auth_storage',
+    tokenKey: 'access_token',
+    refreshTokenKey: 'refresh_token',
+    userKey: 'user_data'
+  }
+});
+```
+
 ## 📚 API Reference
 
 ### AuthSDK Methods
 
 #### `login(credentials: LoginCredentials): Promise<AuthUser>`
-Authenticate user with email/username and password.
+Authenticate user with email and password.
 
 ```javascript
 const user = await authSDK.login({
@@ -201,6 +259,22 @@ Manually refresh authentication tokens.
 const tokens = await authSDK.refreshTokens();
 ```
 
+#### `onAuthStateChanged(listener: StateChangeListener): () => void`
+Subscribe to authentication state changes.
+
+```javascript
+const unsubscribe = authSDK.onAuthStateChanged((state) => {
+  console.log('Auth state:', state);
+  console.log('Is authenticated:', state.isAuthenticated);
+  console.log('Current user:', state.user);
+  console.log('Loading:', state.loading);
+  console.log('Error:', state.error);
+});
+
+// Unsubscribe when no longer needed
+unsubscribe();
+```
+
 #### `getState(): AuthState`
 Get the current authentication state.
 
@@ -221,6 +295,13 @@ Get the current access token.
 
 ```javascript
 const token = authSDK.getAccessToken();
+```
+
+#### `getRefreshToken(): string | null`
+Get the current refresh token.
+
+```javascript
+const refreshToken = authSDK.getRefreshToken();
 ```
 
 #### `isAuthenticated(): boolean`
@@ -245,6 +326,40 @@ const headers = await authSDK.getAuthHeaders();
 // Returns: { Authorization: 'Bearer <token>' }
 ```
 
+### useAuth Hook
+
+The `useAuth` hook provides a convenient way to integrate authentication into React components.
+
+```typescript
+const {
+  isAuthenticated,
+  user,
+  tokens,
+  loading,
+  error,
+  login,
+  register,
+  logout,
+  refreshTokens,
+  getAuthHeaders,
+  getValidAccessToken
+} = useAuth(authSDK);
+```
+
+#### Hook Return Values
+
+- `isAuthenticated`: Boolean indicating if user is authenticated
+- `user`: Current user object or null
+- `tokens`: Current tokens object or null
+- `loading`: Boolean indicating if an auth operation is in progress
+- `error`: Error message string or null
+- `login`: Function to login with credentials
+- `register`: Function to register a new user
+- `logout`: Function to logout the current user
+- `refreshTokens`: Function to manually refresh tokens
+- `getAuthHeaders`: Function to get authorization headers
+- `getValidAccessToken`: Function to get a valid access token
+
 ### TypeScript Types
 
 ```typescript
@@ -258,6 +373,10 @@ interface AuthConfig {
     profile?: string;
   };
   storage?: {
+    type?: 'localStorage' | 'indexedDB';
+    dbName?: string;
+    dbVersion?: number;
+    storeName?: string;
     tokenKey?: string;
     refreshTokenKey?: string;
     userKey?: string;
@@ -272,8 +391,9 @@ interface AuthConfig {
 
 interface AuthUser {
   id: string;
-  email: string;
+  email?: string;
   name?: string;
+  roles?: string[];
   [key: string]: any;
 }
 
@@ -291,15 +411,35 @@ interface AuthState {
   loading: boolean;
   error: string | null;
 }
+
+interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  name?: string;
+  [key: string]: any;
+}
+
+interface StorageAdapter {
+  setItem(key: string, value: string): Promise<void>;
+  getItem(key: string): Promise<string | null>;
+  removeItem(key: string): Promise<void>;
+  clear(): Promise<void>;
+}
 ```
 
 ## 🔒 Security Features
 
 - **Automatic Token Refresh**: Prevents token expiration issues
-- **Secure Storage**: Uses localStorage with configurable keys
+- **Flexible Storage**: Choose between localStorage and IndexedDB
 - **Token Validation**: Validates JWT tokens before use
 - **Error Handling**: Comprehensive error handling and recovery
 - **Memory Management**: Prevents memory leaks with proper cleanup
+- **State Synchronization**: Consistent state across components
 
 ## 🌐 Backend Integration
 
@@ -332,14 +472,150 @@ interface AuthState {
 
 ## 🧪 Testing
 
+### Basic Test Setup
+
 ```javascript
-// Mock the AuthSDK for testing
-const mockAuthSDK = {
-  login: jest.fn(),
-  logout: jest.fn(),
-  isAuthenticated: jest.fn(() => true),
-  getCurrentUser: jest.fn(() => ({ id: '1', email: 'test@example.com' }))
-};
+import { AuthSDK } from 'sdk-simple-auth';
+
+describe('AuthSDK', () => {
+  let authSDK;
+
+  beforeEach(() => {
+    authSDK = new AuthSDK({
+      authServiceUrl: 'http://localhost:3000',
+      storage: {
+        type: 'localStorage',
+        tokenKey: 'test_token',
+        refreshTokenKey: 'test_refresh_token',
+        userKey: 'test_user',
+      },
+      tokenRefresh: {
+        enabled: true,
+        bufferTime: 30,
+      }
+    });
+    
+    jest.clearAllMocks();
+    localStorage.clear();
+  });
+
+  test('should initialize correctly', () => {
+    expect(authSDK).toBeDefined();
+    expect(authSDK.isAuthenticated()).toBe(false);
+  });
+
+  test('should login successfully', async () => {
+    const mockResponse = {
+      access_token: 'mock_access_token',
+      refresh_token: 'mock_refresh_token',
+      user: { id: '1', email: 'user@example.com' },
+    };
+
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    const user = await authSDK.login({
+      email: 'user@example.com',
+      password: 'password123'
+    });
+
+    expect(user.email).toBe('user@example.com');
+    expect(authSDK.isAuthenticated()).toBe(true);
+  });
+});
+```
+
+### Testing with React Hook
+
+```javascript
+import { renderHook, act } from '@testing-library/react';
+import { useAuth } from 'sdk-simple-auth';
+
+test('useAuth hook works correctly', async () => {
+  const { result } = renderHook(() => useAuth(authSDK));
+
+  expect(result.current.isAuthenticated).toBe(false);
+
+  await act(async () => {
+    await result.current.login({
+      email: 'user@example.com',
+      password: 'password123'
+    });
+  });
+
+  expect(result.current.isAuthenticated).toBe(true);
+});
+```
+
+## 📖 Migration Guide
+
+### From v1.0.3 to v1.1.0
+
+#### New Features
+- Added `onAuthStateChanged` method for state subscriptions
+- Added `useAuth` React hook
+- Added flexible storage adapters (localStorage and IndexedDB)
+- Added `getRefreshToken` method
+
+#### Breaking Changes
+- Storage configuration structure changed to support multiple adapters
+- State change callbacks now use the subscription model
+
+#### Migration Steps
+
+1. **Update storage configuration**:
+```javascript
+// Old
+const authSDK = new AuthSDK({
+  authServiceUrl: 'https://api.example.com',
+  // storage keys were direct properties
+});
+
+// New
+const authSDK = new AuthSDK({
+  authServiceUrl: 'https://api.example.com',
+  storage: {
+    type: 'localStorage', // or 'indexedDB'
+    tokenKey: 'auth_access_token',
+    refreshTokenKey: 'auth_refresh_token',
+    userKey: 'auth_user'
+  }
+});
+```
+
+2. **Update state change handling**:
+```javascript
+// Old - using callbacks
+const authSDK = new AuthSDK(config, {
+  onAuthStateChanged: (state) => {
+    console.log('State changed:', state);
+  }
+});
+
+// New - using subscription (recommended)
+const unsubscribe = authSDK.onAuthStateChanged((state) => {
+  console.log('State changed:', state);
+});
+```
+
+3. **Use the new React hook**:
+```javascript
+// Old - manual state management
+const [user, setUser] = useState(null);
+const [loading, setLoading] = useState(false);
+
+useEffect(() => {
+  const unsubscribe = authSDK.onAuthStateChanged((state) => {
+    setUser(state.user);
+    setLoading(state.loading);
+  });
+  return unsubscribe;
+}, []);
+
+// New - using useAuth hook
+const { user, loading, login, logout } = useAuth(authSDK);
 ```
 
 ## 🤝 Contributing
@@ -360,11 +636,19 @@ If you encounter any issues, please file them on our [GitHub Issues](https://git
 
 ## 📖 Changelog
 
-### v1.0.1
+### v1.1.3
+- Added `onAuthStateChanged` method for state subscriptions
+- Added `useAuth` React hook for seamless React integration
+- Added flexible storage adapters (localStorage and IndexedDB)
+- Added `getRefreshToken` method
+- Improved state management and synchronization
+- Enhanced TypeScript support
+
+### v1.0.0
 - Initial release
 - Complete authentication flow
 - Automatic token refresh
-- React integration
+- Basic React integration
 - TypeScript support
 
 ---
