@@ -47,11 +47,17 @@ export interface AuthUser {
 }
 
 export interface LoginCredentials {
-  email: string;
-  password: string;
+  usuario?: string; // For legacy support
+  clave?: string; // For legacy support
+  code?: string; // For legacy support
+  email?: string; // For new implementations
+  password?: string; // For new implementations
 }
 
 export interface RegisterData {
+  usuario?: string; // For legacy support
+  clave?: string; // For legacy support
+  code?: string; // For legacy support
   email: string;
   password: string;
   name?: string;
