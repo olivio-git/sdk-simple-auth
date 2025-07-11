@@ -78,4 +78,5 @@ export interface AuthCallbacks {
   onLogin?: (user: AuthUser, tokens: AuthTokens) => void;
   onLogout?: () => void;
   onError?: (error: string) => void;
+  onTokenExpired?: () => void;
 }

@@ -105,14 +105,15 @@ class TokenExtractor {
    */
   private static extractExpirationTime(response: any): number | undefined {
     const expiresValue = this.deepSearch(response, this.EXPIRES_KEYS);
+    console.log(expiresValue, ' parseado')
     return this.normalizeExpirationTime(expiresValue);
   }
   static extractTokens(response: any): AuthTokens {
     const accessToken = this.deepSearch(response, this.TOKEN_KEYS);
     const refreshToken = this.deepSearch(response, this.REFRESH_TOKEN_KEYS);
-    const expiresIn = this.deepSearch(response, this.EXPIRES_KEYS);
+    const expiresIn = this.extractExpirationTime(response);
     const tokenType = this.deepSearch(response, this.TOKEN_TYPE_KEYS);
-
+    console.log(expiresIn);
     if (!accessToken) {
       throw new Error('No access token found in response');
     }
@@ -233,6 +234,7 @@ class AuthSDK {
   private state: AuthState;
   private callbacks: AuthCallbacks;
   private refreshTimer: NodeJS.Timeout | null = null;
+  private expirationTimer: NodeJS.Timeout | null = null; // Para manejar mi expiracion d tokens// test aun no se si funciona
   private isRefreshing = false;
   private refreshPromise: Promise<AuthTokens> | null = null;
   private storageAdapter: StorageAdapter;
@@ -289,6 +291,96 @@ class AuthSDK {
     this.initializeFromStorage();
   }
 
+
+  // nuevo metodo para probar a ver////// 
+   // Método helper para obtener datos del token almacenado
+  private async getStoredTokenData(): Promise<any> {
+    try {
+      const tokenDataStr = await this.storageAdapter.getItem(this.config.storage.tokenKey || '');
+      if (tokenDataStr) {
+        const tokenData = JSON.parse(tokenDataStr);
+        if (tokenData.storedAt) {
+          return tokenData;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting stored token data:', error);
+    }
+    return null;
+  }
+
+  // Limpiar timer de expiración
+  private clearExpirationTimer(): void {
+    if (this.expirationTimer) {
+      clearTimeout(this.expirationTimer);
+      this.expirationTimer = null;
+    }
+  }
+  private scheduleTokenExpiration(tokens: AuthTokens): void {
+    this.clearExpirationTimer();
+
+    let expirationTime: number | null = null;
+
+    // 1. Intentar obtener expiración del token mismo
+    if (tokens.accessToken) {
+      try {
+        const payload = this.parseTokenPayload(tokens.accessToken);
+        const now = Math.floor(Date.now() / 1000);
+        expirationTime = (payload.exp - now) * 1000;
+      } catch {
+        // Token no es JWT, continuar con otras opciones
+      }
+    }
+
+    // 2. Usar expiresIn si está disponible
+    if (!expirationTime && tokens.expiresIn) {
+      expirationTime = tokens.expiresIn * 1000;
+    }
+
+    // 3. Usar tiempo por defecto si no hay información de expiración
+    if (!expirationTime) {
+      // Por defecto, asumir 1 hora para tokens opacos
+      expirationTime = 60 * 60 * 1000; // 1 hora
+      console.warn('No expiration info found, using default 1 hour expiration');
+    }
+
+    // Solo programar si el tiempo es válido y positivo
+    if (expirationTime > 0) {
+      this.expirationTimer = setTimeout(() => {
+        this.handleTokenExpiration();
+      }, expirationTime);
+
+      console.log(`Token expiration scheduled in ${Math.floor(expirationTime / 1000)} seconds`);
+    }
+  }
+   // Nuevo método para manejar expiración automática
+  private async handleTokenExpiration(): Promise<void> {
+    console.log('Token expired, handling expiration...');
+
+    // Si el refresh está habilitado e tenemos refresh token, intentar refresh
+    if (this.config.tokenRefresh.enabled && this.state.tokens?.refreshToken) {
+      try {
+        console.log('Attempting automatic token refresh...');
+        await this.refreshTokens();
+        return; // Refresh exitoso, no hacer logout
+      } catch (error) {
+        console.error('Automatic token refresh failed:', error);
+        // Continuar con logout automático
+      }
+    }
+
+    // Si no se puede refresh o está deshabilitado, hacer logout automático
+    console.log('Performing automatic logout due to token expiration');
+    await this.logout();
+    
+    // Notificar que la sesión expiró
+    this.callbacks.onTokenExpired?.();
+  }
+
+
+
+
+  ///Aqui separo los metodos de expiracion.
   private createStorageAdapter(): StorageAdapter {
     const storageType = this.config.storage.type || 'indexedDB';
 
@@ -338,7 +430,7 @@ class AuthSDK {
           body: data ? JSON.stringify(data) : undefined,
           ...config,
         });
-        
+
         if (!response.ok) {
           const error = await response.json().catch(() => ({ message: 'Request failed' }));
           throw new Error(error.message || `HTTP ${response.status}`);
@@ -410,7 +502,7 @@ class AuthSDK {
       const storedTokens = await this.getStoredTokens();
       const storedUser = await this.getStoredUser();
 
-      if (storedTokens && storedUser && this.isTokenValid(storedTokens.accessToken)) {
+       if (storedTokens && storedUser && await this.isTokenValid(storedTokens.accessToken)) {
         this.state = {
           isAuthenticated: true,
           user: storedUser,
@@ -419,10 +511,12 @@ class AuthSDK {
           error: null,
         };
 
-        // Programar refresh automático solo si está habilitado
         if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
           this.scheduleTokenRefresh(storedTokens.accessToken);
         }
+
+        // NUEVO: Siempre programar expiración automática
+        this.scheduleTokenExpiration(storedTokens);
 
         this.notifyStateChange();
       } else {
@@ -435,7 +529,7 @@ class AuthSDK {
   }
 
   // Métodos públicos principales - ACTUALIZADOS con búsqueda profunda
-  public async login(credentials: LoginCredentials): Promise<AuthUser> {
+   public async login(credentials: LoginCredentials): Promise<AuthUser> {
     this.setLoading(true);
     this.setError(null);
 
@@ -443,7 +537,6 @@ class AuthSDK {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.login}`;
       const response = await this.config.httpClient.post(url, credentials);
 
-      // Usar el nuevo extractor de tokens
       const tokens = TokenExtractor.extractTokens(response);
       const user = TokenExtractor.extractUser(response);
 
@@ -451,11 +544,9 @@ class AuthSDK {
         throw new Error('No user information found in response');
       }
 
-      // Guardar en storage
       await this.storeTokens(tokens);
       await this.storeUser(user);
 
-      // Actualizar estado
       this.state = {
         isAuthenticated: true,
         user,
@@ -464,10 +555,13 @@ class AuthSDK {
         error: null,
       };
 
-      // Programar refresh automático solo si está habilitado y hay refresh token
+      // Programar refresh automático si está habilitado
       if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
         this.scheduleTokenRefresh(tokens.accessToken);
       }
+
+      // NUEVO: Siempre programar expiración automática
+      this.scheduleTokenExpiration(tokens);
 
       this.notifyStateChange();
       this.callbacks.onLogin?.(user, tokens);
@@ -538,7 +632,6 @@ class AuthSDK {
 
   public async logout(): Promise<void> {
     try {
-      // Intentar hacer logout en el servidor
       if (this.state.tokens?.accessToken) {
         const url = `${this.config.authServiceUrl}${this.config.endpoints.logout}`;
         await this.config.httpClient.post(url, {}, {
@@ -546,14 +639,13 @@ class AuthSDK {
             Authorization: `Bearer ${this.state.tokens.accessToken}`,
           },
         }).catch(() => {
-          // Ignorar errores del servidor en logout
-          // pero continuar con el logout local
+          // Ignorar errores del servidor
         });
       }
     } finally {
-      // Limpiar estado local siempre
       await this.clearStorage();
       this.clearRefreshTimer();
+      this.clearExpirationTimer(); // NUEVO: Limpiar timer de expiración
 
       this.state = {
         isAuthenticated: false,
@@ -649,8 +741,8 @@ class AuthSDK {
     return this.state.tokens?.refreshToken || null;
   }
 
-  public isAuthenticated(): boolean {
-    return this.state.isAuthenticated && this.isTokenValid(this.state.tokens?.accessToken);
+  public async isAuthenticated():Promise<boolean> {
+    return this.state.isAuthenticated && await this.isTokenValid(this.state.tokens?.accessToken);
   }
 
   public async getValidAccessToken(): Promise<string | null> {
@@ -660,7 +752,7 @@ class AuthSDK {
 
     // Si el refresh está deshabilitado, solo devolver el token actual si es válido
     if (!this.config.tokenRefresh.enabled) {
-      return this.isTokenValid(this.state.tokens.accessToken) ? this.state.tokens.accessToken : null;
+      return await this.isTokenValid(this.state.tokens.accessToken) ? this.state.tokens.accessToken : null;
     }
 
     // Si el token está próximo a expirar y hay refresh token, refrescarlo
@@ -717,29 +809,56 @@ class AuthSDK {
   }
 
   // Métodos privados de utilidad
-  private isTokenValid(token?: string): boolean {
+   private async isTokenValid(token?: string):Promise<boolean> {
     if (!token) return false;
 
-    // Si tenemos información de expiración en el estado, usarla
+    // 1. Verificar con información almacenada
     if (this.state.tokens?.expiresIn) {
-      // Calcular si el token ha expirado basado en cuándo se almacenó
-      // Nota: esto es una aproximación, idealmente deberíamos almacenar el timestamp de cuando se obtuvo
-      const now = Math.floor(Date.now() / 1000);
-      const estimatedExpiry = now + this.state.tokens.expiresIn;
-      return estimatedExpiry > now;
+      const tokenData = await this.getStoredTokenData();
+      if (tokenData?.storedAt && tokenData?.expiresIn) {
+        const now = Math.floor(Date.now() / 1000);
+        const timeElapsed = now - tokenData.storedAt;
+        const isValid = timeElapsed < tokenData.expiresIn;
+        
+        if (!isValid) {
+          console.log('Token expired based on stored expiration data');
+        }
+        return isValid;
+      }
     }
 
-    // Fallback: intentar parsear el JWT
+    // 2. Verificar JWT si es posible
     try {
       const payload = this.parseTokenPayload(token);
       const now = Math.floor(Date.now() / 1000);
-      return payload.exp > now;
+      const isValid = payload.exp > now;
+      
+      if (!isValid) {
+        console.log('JWT token expired');
+      }
+      return isValid;
     } catch {
-      // Si no se puede parsear el JWT, asumir que es válido por un tiempo
-      // (esto es para tokens opacos que no son JWT)
-      return true;
+      // 3. Para tokens opacos, usar validación basada en storage
+      const tokenData = await  this.getStoredTokenData();
+      if (tokenData?.storedAt) {
+        const now = Math.floor(Date.now() / 1000);
+        const timeElapsed = now - tokenData.storedAt;
+        // Tiempo por defecto: 1 hora para tokens opacos
+        const defaultExpiration = 60 * 60; // 1 hora
+        const isValid = timeElapsed < defaultExpiration;
+        
+        if (!isValid) {
+          console.log('Opaque token expired based on default expiration');
+        }
+        return isValid;
+      }
     }
+
+    // Si no tenemos información de expiración, considerar inválido por seguridad
+    console.warn('No expiration info available, considering token invalid');
+    return false;
   }
+
 
   private shouldRefreshToken(token: string): boolean {
     if (!this.config.tokenRefresh.enabled) {

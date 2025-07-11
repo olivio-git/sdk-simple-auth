@@ -72,61 +72,6 @@ const unsubscribe = authSDK.onAuthStateChanged((state) => {
 await authSDK.logout();
 ```
 
-### React Integration with useAuth Hook
-
-```jsx
-import React from 'react';
-import { AuthSDK, useAuth } from 'sdk-simple-auth';
-
-const authSDK = new AuthSDK({
-  authServiceUrl: 'https://your-api.com',
-  storage: {
-    type: 'localStorage',
-  }
-});
-
-function AuthProvider({ children }) {
-  return (
-    <AuthContext.Provider value={authSDK}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-function LoginComponent() {
-  const {
-    isAuthenticated,
-    user,
-    loading,
-    error,
-    login,
-    logout
-  } = useAuth(authSDK);
-
-  const handleLogin = async () => {
-    try {
-      await login({
-        email: 'user@example.com',
-        password: 'password123'
-      });
-    } catch (error) {
-      console.error('Login failed:', error);
-    }
-  };
-
-  if (loading) return <div>Loading...</div>;
-  
-  return isAuthenticated ? (
-    <div>
-      <p>Welcome, {user?.email}!</p>
-      <button onClick={logout}>Logout</button>
-    </div>
-  ) : (
-    <button onClick={handleLogin}>Login</button>
-  );
-}
-```
-
 ## ⚙️ Configuration
 
 ### Complete Configuration Options
@@ -548,17 +493,6 @@ test('useAuth hook works correctly', async () => {
   expect(result.current.isAuthenticated).toBe(true);
 });
 ```
-
-## 📖 Migration Guide
-
-### From v1.0.3 to v1.1.0
-
-#### New Features
-- Added `onAuthStateChanged` method for state subscriptions
-- Added `useAuth` React hook
-- Added flexible storage adapters (localStorage and IndexedDB)
-- Added `getRefreshToken` method
-
 #### Breaking Changes
 - Storage configuration structure changed to support multiple adapters
 - State change callbacks now use the subscription model
@@ -624,33 +558,7 @@ const { user, loading, login, logout } = useAuth(authSDK);
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🐛 Issues
-
-If you encounter any issues, please file them on our [GitHub Issues](https://github.com/olivio-git/auth-sdk/issues) page.
-
-## 📖 Changelog
-
-### v1.1.0
-- Added `onAuthStateChanged` method for state subscriptions
-- Added `useAuth` React hook for seamless React integration
-- Added flexible storage adapters (localStorage and IndexedDB)
-- Added `getRefreshToken` method
-- Improved state management and synchronization
-- Enhanced TypeScript support
-
-### v1.0.3
-- Initial release
-- Complete authentication flow
-- Automatic token refresh
-- Basic React integration
-- TypeScript support
-
+5. Open a Pull Request 
 ---
 
 Made with ❤️ by [olivio-git](https://github.com/olivio-git)

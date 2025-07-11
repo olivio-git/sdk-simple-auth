@@ -6,7 +6,7 @@ describe('AuthSDK', () => {
   let authSDK: AuthSDK;
   beforeEach(() => {
     authSDK = new AuthSDK({
-      authServiceUrl: 'http://192.168.1.14:8588/api/v1',
+      authServiceUrl: 'http://localhost:3001/api/v1',
       endpoints: {
         login: '/login',
         refresh: '/refreshToken',
@@ -46,9 +46,9 @@ describe('AuthSDK', () => {
 
 
 
-  test('should initialize correctly', () => {
+  test('should initialize correctly', async () => {
     expect(authSDK).toBeDefined();
-    expect(authSDK.isAuthenticated()).toBe(false);
+    expect(await authSDK.isAuthenticated()).toBe(false);
   });
 
   //Login test
