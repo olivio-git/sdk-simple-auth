@@ -58,7 +58,7 @@ const user = await authSDK.login({
 });
 
 // Check authentication status
-const isAuthenticated = authSDK.isAuthenticated();
+const isAuthenticated = await authSDK.isAuthenticated();
 
 // Get current user
 const currentUser = authSDK.getCurrentUser();
@@ -253,7 +253,7 @@ const refreshToken = authSDK.getRefreshToken();
 Check if user is currently authenticated.
 
 ```javascript
-const isAuth = authSDK.isAuthenticated();
+const isAuth = await authSDK.isAuthenticated();
 ```
 
 #### `getValidAccessToken(): Promise<string | null>`
@@ -444,9 +444,9 @@ describe('AuthSDK', () => {
     localStorage.clear();
   });
 
-  test('should initialize correctly', () => {
+  test('should initialize correctly', async () => {
     expect(authSDK).toBeDefined();
-    expect(authSDK.isAuthenticated()).toBe(false);
+    await expect(authSDK.isAuthenticated()).toBe(false);
   });
 
   test('should login successfully', async () => {
@@ -467,7 +467,7 @@ describe('AuthSDK', () => {
     });
 
     expect(user.email).toBe('user@example.com');
-    expect(authSDK.isAuthenticated()).toBe(true);
+    await expect(authSDK.isAuthenticated()).toBe(true);
   });
 });
 ```
