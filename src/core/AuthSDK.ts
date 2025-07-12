@@ -104,16 +104,14 @@ class TokenExtractor {
    * Extrae y normaliza el tiempo de expiración
    */
   private static extractExpirationTime(response: any): number | undefined {
-    const expiresValue = this.deepSearch(response, this.EXPIRES_KEYS);
-    console.log(expiresValue, ' parseado')
+    const expiresValue = this.deepSearch(response, this.EXPIRES_KEYS); 
     return this.normalizeExpirationTime(expiresValue);
   }
   static extractTokens(response: any): AuthTokens {
     const accessToken = this.deepSearch(response, this.TOKEN_KEYS);
     const refreshToken = this.deepSearch(response, this.REFRESH_TOKEN_KEYS);
     const expiresIn = this.extractExpirationTime(response);
-    const tokenType = this.deepSearch(response, this.TOKEN_TYPE_KEYS);
-    console.log(expiresIn);
+    const tokenType = this.deepSearch(response, this.TOKEN_TYPE_KEYS); 
     if (!accessToken) {
       throw new Error('No access token found in response');
     }
