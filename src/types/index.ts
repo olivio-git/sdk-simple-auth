@@ -35,6 +35,7 @@ export interface AuthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresIn?: number;
+  expiresAt?: string | number;
   tokenType?: string;
 }
 

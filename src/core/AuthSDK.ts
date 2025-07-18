@@ -2,11 +2,11 @@ import { IndexedDBAdapter } from '../storage/IndexedDBAdapter';
 import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
 import { StorageAdapter } from '../storage/StorageAdapter';
 import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient, LoginCredentials, RegisterData } from '../types';
+import ExpirationHandler from './ExpirationHandler';
+import { TokenHandler } from './TokenHandler';
 
 // Tipo para el callback de suscripción
 type StateChangeListener = (state: AuthState) => void;
-
-// Utilitarios para búsqueda profunda
 class TokenExtractor {
   private static readonly TOKEN_KEYS = [
     'accessToken', 'access_token', 'token', 'authToken', 'auth_token',
@@ -104,14 +104,14 @@ class TokenExtractor {
    * Extrae y normaliza el tiempo de expiración
    */
   private static extractExpirationTime(response: any): number | undefined {
-    const expiresValue = this.deepSearch(response, this.EXPIRES_KEYS); 
+    const expiresValue = this.deepSearch(response, this.EXPIRES_KEYS);
     return this.normalizeExpirationTime(expiresValue);
   }
   static extractTokens(response: any): AuthTokens {
     const accessToken = this.deepSearch(response, this.TOKEN_KEYS);
     const refreshToken = this.deepSearch(response, this.REFRESH_TOKEN_KEYS);
     const expiresIn = this.extractExpirationTime(response);
-    const tokenType = this.deepSearch(response, this.TOKEN_TYPE_KEYS); 
+    const tokenType = this.deepSearch(response, this.TOKEN_TYPE_KEYS);
     if (!accessToken) {
       throw new Error('No access token found in response');
     }
@@ -291,7 +291,7 @@ class AuthSDK {
 
 
   // nuevo metodo para probar a ver////// 
-   // Método helper para obtener datos del token almacenado
+  // Método helper para obtener datos del token almacenado
   private async getStoredTokenData(): Promise<any> {
     try {
       const tokenDataStr = await this.storageAdapter.getItem(this.config.storage.tokenKey || '');
@@ -317,48 +317,38 @@ class AuthSDK {
   private scheduleTokenExpiration(tokens: AuthTokens): void {
     this.clearExpirationTimer();
 
-    let expirationTime: number | null = null;
+    const expiresInSeconds = ExpirationHandler.calculateExpiration(
+      tokens.accessToken,
+      tokens.expiresIn,
+      tokens.expiresAt
+    );
 
-    // 1. Intentar obtener expiración del token mismo
-    if (tokens.accessToken) {
-      try {
-        const payload = this.parseTokenPayload(tokens.accessToken);
-        const now = Math.floor(Date.now() / 1000);
-        expirationTime = (payload.exp - now) * 1000;
-      } catch {
-        // Token no es JWT, continuar con otras opciones
-      }
-    }
+    if (!expiresInSeconds) {
+      // Usar tiempo por defecto basado en el tipo de token
+      const tokenInfo = TokenHandler.parseToken(tokens.accessToken);
+      const defaultExpiration = tokenInfo.type === 'sanctum' ? 24 * 60 * 60 : 60 * 60;
+      console.warn(`No expiration info found, using default ${defaultExpiration}s expiration`);
 
-    // 2. Usar expiresIn si está disponible
-    if (!expirationTime && tokens.expiresIn) {
-      expirationTime = tokens.expiresIn * 1000;
-    }
-
-    // 3. Usar tiempo por defecto si no hay información de expiración
-    if (!expirationTime) {
-      // Por defecto, asumir 1 hora para tokens opacos
-      expirationTime = 60 * 60 * 1000; // 1 hora
-      console.warn('No expiration info found, using default 1 hour expiration');
-    }
-
-    // Solo programar si el tiempo es válido y positivo
-    if (expirationTime > 0) {
       this.expirationTimer = setTimeout(() => {
         this.handleTokenExpiration();
-      }, expirationTime);
-
-      console.log(`Token expiration scheduled in ${Math.floor(expirationTime / 1000)} seconds`);
+      }, defaultExpiration * 1000);
+      return;
     }
+
+    this.expirationTimer = setTimeout(() => {
+      this.handleTokenExpiration();
+    }, expiresInSeconds * 1000);
+
+    // console.log(`Token expiration scheduled in ${expiresInSeconds} seconds`);
   }
-   // Nuevo método para manejar expiración automática
+  // Nuevo método para manejar expiración automática
   private async handleTokenExpiration(): Promise<void> {
-    console.log('Token expired, handling expiration...');
+    // console.log('Token expired, handling expiration...');
 
     // Si el refresh está habilitado e tenemos refresh token, intentar refresh
     if (this.config.tokenRefresh.enabled && this.state.tokens?.refreshToken) {
       try {
-        console.log('Attempting automatic token refresh...');
+        // console.log('Attempting automatic token refresh...');
         await this.refreshTokens();
         return; // Refresh exitoso, no hacer logout
       } catch (error) {
@@ -368,9 +358,9 @@ class AuthSDK {
     }
 
     // Si no se puede refresh o está deshabilitado, hacer logout automático
-    console.log('Performing automatic logout due to token expiration');
+    // console.log('Performing automatic logout due to token expiration');
     await this.logout();
-    
+
     // Notificar que la sesión expiró
     this.callbacks.onTokenExpired?.();
   }
@@ -500,7 +490,7 @@ class AuthSDK {
       const storedTokens = await this.getStoredTokens();
       const storedUser = await this.getStoredUser();
 
-       if (storedTokens && storedUser && await this.isTokenValid(storedTokens.accessToken)) {
+      if (storedTokens && storedUser) {
         this.state = {
           isAuthenticated: true,
           user: storedUser,
@@ -510,7 +500,7 @@ class AuthSDK {
         };
 
         if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
-          this.scheduleTokenRefresh(storedTokens.accessToken);
+          this.scheduleTokenRefresh(storedTokens);
         }
 
         // NUEVO: Siempre programar expiración automática
@@ -527,7 +517,7 @@ class AuthSDK {
   }
 
   // Métodos públicos principales - ACTUALIZADOS con búsqueda profunda
-   public async login(credentials: LoginCredentials): Promise<AuthUser> {
+  public async login(credentials: LoginCredentials): Promise<AuthUser> {
     this.setLoading(true);
     this.setError(null);
 
@@ -555,7 +545,7 @@ class AuthSDK {
 
       // Programar refresh automático si está habilitado
       if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
-        this.scheduleTokenRefresh(tokens.accessToken);
+        this.scheduleTokenRefresh(tokens);
       }
 
       // NUEVO: Siempre programar expiración automática
@@ -605,7 +595,7 @@ class AuthSDK {
 
         // Programar refresh automático solo si está habilitado y hay refresh token
         if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
-          this.scheduleTokenRefresh(tokens.accessToken);
+          this.scheduleTokenRefresh(tokens);
         }
 
         this.notifyStateChange();
@@ -681,6 +671,32 @@ class AuthSDK {
     }
   }
 
+  private processRefreshResponse(response: any, originalRefreshToken: string): AuthTokens {
+    const tokens = TokenExtractor.extractTokens(response);
+
+    // Mantener el refresh token original si no viene uno nuevo
+    if (!tokens.refreshToken) {
+      tokens.refreshToken = originalRefreshToken;
+    }
+
+    // Actualizar storage y estado
+    this.storeTokens(tokens);
+    this.state.tokens = tokens;
+
+    // Programar próximo refresh
+    if (this.config.tokenRefresh.enabled) {
+      this.scheduleTokenRefresh(tokens);
+    }
+
+    // Programar expiración automática
+    this.scheduleTokenExpiration(tokens);
+
+    this.notifyStateChange();
+    this.callbacks.onTokenRefresh?.(tokens);
+
+    return tokens;
+  }
+
   private async performTokenRefresh(): Promise<AuthTokens> {
     const refreshToken = this.state.tokens?.refreshToken;
 
@@ -690,37 +706,41 @@ class AuthSDK {
 
     try {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.refresh}`;
-      const response = await this.config.httpClient.post(url, {
-        refresh_token: refreshToken,
-      });
 
-      // Usar el nuevo extractor de tokens
-      const tokens = TokenExtractor.extractTokens(response);
+      // Detectar tipo de token para decidir cómo enviarlo
+      const tokenInfo = TokenHandler.parseToken(refreshToken);
 
-      // Mantener el refresh token si no viene uno nuevo
-      if (!tokens.refreshToken) {
-        tokens.refreshToken = refreshToken;
+      let requestConfig: any = {};
+
+      if (tokenInfo.type === 'sanctum') {
+        // Para Sanctum, enviar el token en Authorization header
+        requestConfig = {
+          headers: {
+            Authorization: `Bearer ${refreshToken}`
+          }
+        };
+
+        // También enviar en el body por compatibilidad
+        const response = await this.config.httpClient.post(url, {
+          refresh_token: refreshToken,
+        }, requestConfig);
+
+        return this.processRefreshResponse(response, refreshToken);
+      } else {
+        // Para JWT y otros, enviar en el body
+        const response = await this.config.httpClient.post(url, {
+          refresh_token: refreshToken,
+        });
+
+        return this.processRefreshResponse(response, refreshToken);
       }
-
-      // Actualizar storage y estado
-      await this.storeTokens(tokens);
-      this.state.tokens = tokens;
-
-      // Programar próximo refresh solo si está habilitado
-      if (this.config.tokenRefresh.enabled) {
-        this.scheduleTokenRefresh(tokens.accessToken);
-      }
-
-      this.notifyStateChange();
-      this.callbacks.onTokenRefresh?.(tokens);
-
-      return tokens;
     } catch (error) {
-      // Si falla el refresh, hacer logout
       await this.logout();
       throw error;
     }
   }
+
+
 
   // Métodos de utilidad públicos
   public getState(): AuthState {
@@ -739,7 +759,7 @@ class AuthSDK {
     return this.state.tokens?.refreshToken || null;
   }
 
-  public async isAuthenticated():Promise<boolean> {
+  public async isAuthenticated(): Promise<boolean> {
     return this.state.isAuthenticated && await this.isTokenValid(this.state.tokens?.accessToken);
   }
 
@@ -765,7 +785,20 @@ class AuthSDK {
 
     return this.state.tokens.accessToken;
   }
+  public debugToken(token: string): void {
+    console.log('=== Token Debug ===');
+    const tokenInfo = TokenHandler.parseToken(token);
+    console.log('Token type:', tokenInfo.type);
+    console.log('Token info:', tokenInfo);
 
+    if (tokenInfo.type === 'jwt' && tokenInfo.payload) {
+      console.log('JWT Payload:', tokenInfo.payload);
+      if (tokenInfo.exp) {
+        const expiryDate = new Date(tokenInfo.exp * 1000);
+        console.log('JWT expires at:', expiryDate.toISOString());
+      }
+    }
+  }
   // Métodos para integración con otros clientes HTTP
   public async getAuthHeaders(): Promise<Record<string, string>> {
     const token = await this.getValidAccessToken();
@@ -805,58 +838,67 @@ class AuthSDK {
       console.log('User extraction error:', error);
     }
   }
+  private async validateSanctumToken(token: string): Promise<boolean> {
+    const tokenData = await this.getStoredTokenData();
+    if (!tokenData?.storedAt) return false;
 
+    // Si tenemos expiresAt (formato ISO), usarlo
+    if (tokenData.expiresAt) {
+      const expiresIn = ExpirationHandler.normalizeExpiration(tokenData.expiresAt);
+      return expiresIn ? expiresIn > 0 : false;
+    }
+
+    // Si tenemos expiresIn, calcular basándose en cuándo se almacenó
+    if (tokenData.expiresIn) {
+      const now = Math.floor(Date.now() / 1000);
+      const timeElapsed = now - tokenData.storedAt;
+      return timeElapsed < tokenData.expiresIn;
+    }
+
+    // Tiempo por defecto para Sanctum: 24 horas
+    const now = Math.floor(Date.now() / 1000);
+    const timeElapsed = now - tokenData.storedAt;
+    const defaultExpiration = 24 * 60 * 60; // 24 horas
+    return timeElapsed < defaultExpiration;
+  }
+  //CLAUDE
+  private async validateOpaqueToken(token: string): Promise<boolean> {
+    const tokenData = await this.getStoredTokenData();
+    if (!tokenData?.storedAt) return false;
+
+    const now = Math.floor(Date.now() / 1000);
+    const timeElapsed = now - tokenData.storedAt;
+    const defaultExpiration = 60 * 60; // 1 hora por defecto
+    return timeElapsed < defaultExpiration;
+  }
   // Métodos privados de utilidad
-   private async isTokenValid(token?: string):Promise<boolean> {
+  private async isTokenValid(token?: string): Promise<boolean> {
     if (!token) return false;
 
-    // 1. Verificar con información almacenada
-    if (this.state.tokens?.expiresIn) {
-      const tokenData = await this.getStoredTokenData();
-      if (tokenData?.storedAt && tokenData?.expiresIn) {
-        const now = Math.floor(Date.now() / 1000);
-        const timeElapsed = now - tokenData.storedAt;
-        const isValid = timeElapsed < tokenData.expiresIn;
-        
-        if (!isValid) {
-          console.log('Token expired based on stored expiration data');
-        }
-        return isValid;
-      }
+    const tokenInfo = TokenHandler.parseToken(token);
+    if (!tokenInfo) {
+      console.warn('Invalid token format');
+      return false;
     }
+    switch (tokenInfo.type) {
+      case 'jwt':
+        // Para JWT, usar la información del payload
+        return tokenInfo.isValid;
 
-    // 2. Verificar JWT si es posible
-    try {
-      const payload = this.parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      const isValid = payload.exp > now;
-      
-      if (!isValid) {
-        console.log('JWT token expired');
-      }
-      return isValid;
-    } catch {
-      // 3. Para tokens opacos, usar validación basada en storage
-      const tokenData = await  this.getStoredTokenData();
-      if (tokenData?.storedAt) {
-        const now = Math.floor(Date.now() / 1000);
-        const timeElapsed = now - tokenData.storedAt;
-        // Tiempo por defecto: 1 hora para tokens opacos
-        const defaultExpiration = 60 * 60; // 1 hora
-        const isValid = timeElapsed < defaultExpiration;
-        
-        if (!isValid) {
-          console.log('Opaque token expired based on default expiration');
-        }
-        return isValid;
-      }
+      case 'sanctum':
+        // Para Sanctum, verificar con información almacenada
+        return await this.validateSanctumToken(token);
+
+      case 'opaque':
+        // Para tokens opacos, verificar con información almacenada
+        return await this.validateOpaqueToken(token);
+
+      default:
+        return false;
     }
-
-    // Si no tenemos información de expiración, considerar inválido por seguridad
-    console.warn('No expiration info available, considering token invalid');
-    return false;
   }
 
+  //CLAUDE
 
   private shouldRefreshToken(token: string): boolean {
     if (!this.config.tokenRefresh.enabled) {
@@ -882,33 +924,95 @@ class AuthSDK {
   }
 
   private parseTokenPayload(token: string): any {
-    const base64Payload = token.split('.')[1];
-    const payload = JSON.parse(atob(base64Payload));
-    return payload;
+    try {
+      if (!token || typeof token !== 'string') {
+        throw new Error('Token inválido o vacío');
+      }
+
+      // Detectar si es un token de Sanctum (contiene |)
+      if (token.includes("|")) {
+        // console.log('Token de Sanctum detectado');
+        return {
+          type: 'sanctum',
+          tokenId: token.split('|')[0],
+          hash: token.split('|')[1],
+          warning: 'Sanctum tokens do not contain payload data'
+        };
+      }
+
+      // Procesar tokens JWT
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Token JWT inválido: debe tener 3 partes');
+      }
+
+      const base64Payload = parts[1];
+
+      // Añadir padding si es necesario
+      const paddedBase64 = base64Payload.padEnd(
+        base64Payload.length + (4 - (base64Payload.length % 4)) % 4,
+        '='
+      );
+
+      // console.log('JWT Base64 payload:', paddedBase64);
+
+      // Decodificar base64
+      const decodedPayload = atob(paddedBase64);
+      // console.log('JWT Decoded payload:', decodedPayload);
+
+      // Parsear JSON
+      const payload = JSON.parse(decodedPayload);
+      return {
+        type: 'jwt',
+        ...payload
+      };
+
+    } catch (error: any) {
+      console.error('Error parsing token payload:', error);
+      console.error('Token recibido:', token);
+      throw new Error(`Error parsing token: ${error.message}`);
+    }
   }
 
-  private scheduleTokenRefresh(token: string): void {
-    // Solo programar refresh si está habilitado
-    if (!this.config.tokenRefresh.enabled) {
-      return;
-    }
+  private scheduleTokenRefresh(tokens: AuthTokens): void { //CLAUDE
+    if (!this.config.tokenRefresh.enabled || !tokens.refreshToken) return;
 
     this.clearRefreshTimer();
 
-    try {
-      const payload = this.parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      const timeUntilRefresh = (payload.exp - now - this.config.tokenRefresh.bufferTime!) * 1000;
+    let expiresInSeconds: number | undefined;
 
-      if (timeUntilRefresh > 0) {
-        this.refreshTimer = setTimeout(() => {
-          this.refreshTokens().catch(console.error);
-        }, timeUntilRefresh);
-      }
-    } catch (error) {
-      console.error('Error scheduling token refresh:', error);
+    // Calcular cuándo refrescar usando el nuevo handler
+    expiresInSeconds = ExpirationHandler.calculateExpiration(
+      tokens.accessToken,
+      tokens.expiresIn,
+      tokens.expiresAt
+    );
+
+    if (!expiresInSeconds) {
+      console.warn('No expiration info available, skipping automatic refresh');
+      return;
+    }
+
+    const bufferMs = this.config.tokenRefresh.bufferTime! * 1000;
+    const expiresMs = expiresInSeconds * 1000;
+    const timeUntilRefresh = expiresMs - bufferMs;
+
+    if (timeUntilRefresh > 0) {
+      this.refreshTimer = setTimeout(() => {
+        this.refreshTokens().catch(console.error);
+      }, timeUntilRefresh);
+
+      // console.log(`Token refresh scheduled in ${Math.floor(timeUntilRefresh / 1000)}s`);
+    } else {
+      console.warn('Buffer time mayor que expiresIn, refresh inmediato requerido');
+      // Programar refresh inmediato si el token está muy cerca de expirar
+      this.refreshTimer = setTimeout(() => {
+        this.refreshTokens().catch(console.error);
+      }, 1000);
     }
   }
+
+
 
   private clearRefreshTimer(): void {
     if (this.refreshTimer) {
@@ -919,22 +1023,16 @@ class AuthSDK {
 
   // Métodos de storage actualizados para usar el adaptador
   private async storeTokens(tokens: AuthTokens): Promise<void> {
-    try {
-      // Almacenar token con timestamp para cálculos de expiración más precisos
-      const tokenData = {
-        ...tokens,
-        storedAt: Math.floor(Date.now() / 1000) // timestamp Unix
-      };
-
-      await this.storageAdapter.setItem(this.config.storage.tokenKey || '', JSON.stringify(tokenData));
-
-      if (tokens.refreshToken) {
-        await this.storageAdapter.setItem(this.config.storage.refreshTokenKey || '', tokens.refreshToken);
-      }
-    } catch (error) {
-      console.error('Error storing tokens:', error);
+    const tokenData = {
+      ...tokens,
+      storedAt: Math.floor(Date.now() / 1000)
+    };
+    await this.storageAdapter.setItem(this.config.storage.tokenKey!, JSON.stringify(tokenData));
+    if (tokens.refreshToken) {
+      await this.storageAdapter.setItem(this.config.storage.refreshTokenKey!, tokens.refreshToken);
     }
   }
+
 
   private async storeUser(user: AuthUser): Promise<void> {
     try {
