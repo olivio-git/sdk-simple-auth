@@ -2,7 +2,7 @@ import type { Config } from 'jest';
 
 const config: Config = {
     preset: 'ts-jest',
-    // testEnvironment: 'jsdom',
+    testEnvironment: 'jsdom', // ✅ Activar jsdom
     roots: ['<rootDir>/src', '<rootDir>/tests'],
     testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
     transform: {

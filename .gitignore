@@ -118,3 +118,16 @@ examples/private/
 
 # === Migration files ===
 migrate_to_enhanced.sh
+
+ESM_FIX_APPLIED.md
+build_manual.js
+check_status.sh
+fix_build.js
+fix_esm_build.js
+make_executable.sh
+quick_fix.sh
+rebuild.sh
+rebuild_clean.sh
+rebuild_fixed.sh
+test_and_publish.sh
+verify_build.js

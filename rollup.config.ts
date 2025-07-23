@@ -9,6 +9,21 @@ const globals = {
   'react-dom': 'ReactDOM',
 };
 
+const typescriptOptions = {
+  tsconfig: './tsconfig.json',
+  declaration: true,
+  declarationDir: 'dist',
+  rootDir: 'src',
+  resolveJsonModule: true,
+  preserveSymlinks: true,
+};
+
+const commonResolveOptions = {
+  browser: true,
+  preferBuiltins: false,
+  exportConditions: ['node', 'import', 'module', 'default'],
+};
+
 export default [
   // ES Module build
   {
@@ -18,41 +33,39 @@ export default [
       format: 'esm',
       sourcemap: true,
       exports: 'named',
+      interop: 'auto',
     },
     external,
     plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
+      nodeResolve(commonResolveOptions),
+      commonjs({
+        include: /node_modules/,
+        transformMixedEsModules: true,
       }),
-      commonjs(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        declaration: true,
-        declarationDir: 'dist',
-        rootDir: 'src',
-      }),
+      typescript(typescriptOptions),
     ],
   },
   
-  // CommonJS build - FIXED: matching package.json
+  // CommonJS build
   {
     input: 'src/index.ts',
     output: {
-      file: 'dist/index.cjs.js', // ✅ Now matches package.json
+      file: 'dist/index.cjs.js',
       format: 'cjs',
       sourcemap: true,
       exports: 'named',
+      interop: 'auto',
     },
     external,
     plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
+      nodeResolve(commonResolveOptions),
+      commonjs({
+        include: /node_modules/,
+        transformMixedEsModules: true,
       }),
-      commonjs(),
       typescript({
-        tsconfig: './tsconfig.json',
+        ...typescriptOptions,
+        declaration: false, // Solo generar tipos una vez
       }),
     ],
   },
@@ -67,16 +80,18 @@ export default [
       sourcemap: true,
       globals,
       exports: 'named',
+      interop: 'auto',
     },
     external,
     plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
+      nodeResolve(commonResolveOptions),
+      commonjs({
+        include: /node_modules/,
+        transformMixedEsModules: true,
       }),
-      commonjs(),
       typescript({
-        tsconfig: './tsconfig.json',
+        ...typescriptOptions,
+        declaration: false,
       }),
       terser({
         compress: {
@@ -99,16 +114,18 @@ export default [
       format: 'esm',
       sourcemap: true,
       exports: 'named',
+      interop: 'auto',
     },
     external,
     plugins: [
-      nodeResolve({
-        browser: true,
-        preferBuiltins: false,
+      nodeResolve(commonResolveOptions),
+      commonjs({
+        include: /node_modules/,
+        transformMixedEsModules: true,
       }),
-      commonjs(),
       typescript({
-        tsconfig: './tsconfig.json',
+        ...typescriptOptions,
+        declaration: false,
       }),
       terser({
         compress: {

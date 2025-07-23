@@ -1,9 +1,9 @@
 // =============================================
-// SDK SIMPLE AUTH - ENHANCED VERSION
-// Compatibilidad total hacia atrás + Nuevas características
+// SDK SIMPLE AUTH - ENHANCED VERSION - FIXED
+// Fixed version with proper module resolution
 // =============================================
 
-// === EXPORTS EXISTENTES (Compatibilidad hacia atrás) ===
+// === CORE EXPORTS ===
 export { AuthSDK } from './core/AuthSDK';
 export { useAuth } from './hooks/useAuth';
 export { LocalStorageAdapter } from './storage/LocalStorageAdapter';
@@ -14,7 +14,7 @@ export { RefreshManager } from './core/RefreshManager';
 
 export type { StorageAdapter } from './storage/StorageAdapter';
  
-// Tipos existentes para compatibilidad
+// === TYPES ===
 export type {
   AuthConfig,
   AuthState,
@@ -26,21 +26,6 @@ export type {
   AuthCallbacks,
 } from './types';
 
-// === NUEVAS CARACTERÍSTICAS MEJORADAS ===
-
-// Factory principal para configuración fácil
-export { 
-  AuthSDKFactory,
-  createNodeExpressAuth,
-  createLaravelSanctumAuth,
-  createJWTStandardAuth,
-  createAutoDetectAuth,
-  testBackendResponse,
-  createDevAuth,
-  runMockTests
-} from './factory/AuthSDKFactory.js';
-
-// Tipos mejorados con preservación de datos
 export type {
   EnhancedAuthConfig,
   EnhancedAuthTokens,
@@ -55,98 +40,70 @@ export type {
   AuthEvent
 } from './types/enhanced_types';
 
-// Presets de configuración para backends populares
+// === FACTORY AND PRESETS ===
+export { 
+  AuthSDKFactory,
+  createNodeExpressAuth,
+  createLaravelSanctumAuth,
+  createJWTStandardAuth,
+  createAutoDetectAuth,
+  testBackendResponse,
+  createDevAuth,
+  runMockTests
+} from './factory/AuthSDKFactory';
+
 export { BACKEND_PRESETS } from './types/enhanced_types';
 
-// Ejemplos y utilities
+// === EXAMPLES ===
 export { default as examples } from './examples';
 
-// === SHORTCUTS PARA USO RÁPIDO ===
+// === QUICK FACTORY FUNCTIONS - FIXED ===
+// Import statically and use directly to avoid dynamic require()
+import { 
+  createNodeExpressAuth as _createNodeExpressAuth,
+  createLaravelSanctumAuth as _createLaravelSanctumAuth,
+  createAutoDetectAuth as _createAutoDetectAuth,
+  testBackendResponse as _testBackendResponse
+} from './factory/AuthSDKFactory';
 
 /**
- * Crear SDK para tu sistema Node.js/Express actual
- * 
- * @example
- * ```typescript
- * import { createQuickNodeAuth } from 'sdk-simple-auth';
- * 
- * const auth = createQuickNodeAuth('http://localhost:3000');
- * const user = await auth.login({ email: 'user@test.com', password: 'pass' });
- * 
- * // Ahora preserva TODOS los datos del backend
- * console.log(user._originalUserResponse); // Respuesta completa
- * console.log(user.firstName, user.lastName); // Campos antes perdidos
- * ```
+ * Quick Node.js/Express Auth Setup
  */
 export function createQuickNodeAuth(baseUrl: string = 'http://localhost:3000') {
-  const { createNodeExpressAuth } = require('./factory/AuthSDKFactory');
-  return createNodeExpressAuth(baseUrl);
+  return _createNodeExpressAuth(baseUrl);
 }
 
 /**
- * Crear SDK para Laravel Sanctum
- * 
- * @example
- * ```typescript
- * import { createQuickSanctumAuth } from 'sdk-simple-auth';
- * 
- * const auth = createQuickSanctumAuth('http://localhost:8000/api');
- * const user = await auth.login({ 
- *   email: 'user@test.com', 
- *   password: 'pass',
- *   device_name: 'mi-app' 
- * });
- * 
- * console.log(user.sucursales); // Campos específicos preservados
- * ```
+ * Quick Laravel Sanctum Auth Setup
  */
 export function createQuickSanctumAuth(baseUrl: string = 'http://localhost:8000/api') {
-  const { createLaravelSanctumAuth } = require('./factory/AuthSDKFactory');
-  return createLaravelSanctumAuth(baseUrl);
+  return _createLaravelSanctumAuth(baseUrl);
 }
 
 /**
- * Analizar respuesta de backend y crear SDK automáticamente configurado
- * 
- * @example
- * ```typescript
- * import { quickAnalyzeAndCreate } from 'sdk-simple-auth';
- * 
- * const sampleResponse = { success: true, data: { user: {...} } };
- * const auth = quickAnalyzeAndCreate(sampleResponse, 'http://localhost:3000');
- * ```
+ * Quick analyze and create SDK
  */
 export function quickAnalyzeAndCreate(sampleResponse: any, baseUrl: string) {
-  const { createAutoDetectAuth } = require('./factory/AuthSDKFactory');
-  return createAutoDetectAuth(sampleResponse, baseUrl);
+  return _createAutoDetectAuth(sampleResponse, baseUrl);
 }
 
 /**
- * Testing rápido de respuesta de backend
- * 
- * @example
- * ```typescript
- * import { quickTest } from 'sdk-simple-auth';
- * 
- * const response = await fetch('/api/login', { ... });
- * quickTest(response); // Ver análisis en consola
- * ```
+ * Quick response testing
  */
 export function quickTest(response: any) {
-  const { testBackendResponse } = require('./factory/AuthSDKFactory');
-  return testBackendResponse(response);
+  return _testBackendResponse(response);
 }
 
-// === INFORMACIÓN DE VERSIÓN ===
-export const SDK_VERSION = '2.0.0-enhanced';
+// === VERSION INFO ===
+export const SDK_VERSION = '2.0.0-enhanced-fixed';
 export const SDK_FEATURES = {
   multiBackend: true,
   dataPreservation: true,
   autoDetection: true,
   advancedDebugging: true,
-  backwardCompatible: true
+  backwardCompatible: true,
+  esmFixed: true
 };
 
-// === DEFAULT EXPORT PARA CONVENIENCIA ===
-import { AuthSDKFactory } from './factory/AuthSDKFactory.js';
-export default AuthSDKFactory;
+// === DEFAULT EXPORT ===
+export { AuthSDKFactory as default } from './factory/AuthSDKFactory';
