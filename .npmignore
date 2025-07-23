@@ -1,12 +1,101 @@
+# ===================================
+# SDK SIMPLE AUTH - .npmignore
+# ===================================
+# Archivos que NO se incluyen en el paquete NPM
+
+# === Source files (solo incluir dist/) ===
 src/
-tests/
-examples/
-docs/
-.gitignore
-.eslintrc.js
-jest.config.js
-rollup.config.js
+*.ts
+*.tsx
+!dist/**/*.d.ts
+
+# === Development files ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Build tools ===
+rollup.config.ts
 tsconfig.json
-*.log
+jest.config.ts
+.eslintrc.*
+.prettierrc.*
+
+# === Testing ===
+tests/
+test/
+__tests__/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
 coverage/
 .nyc_output/
+
+# === Development scripts ===
+test_*.js
+test_*.mjs
+quick_test.*
+find_issues.sh
+test_build*.js
+
+# === Documentation drafts ===
+docs/drafts/
+*.draft.md
+IMPLEMENTATION_COMPLETE.md
+ESTRUCTURE.MD
+README_ENHANCED.md
+PROJECT_STRUCTURE.md
+IMPLEMENTATION_COMPLETE.md
+# === Backup and temporary files ===
+backup_*/
+*.backup
+*.bak
+CORRECCIONES_APLICADAS.md
+migrate_to_enhanced.sh
+
+# === Examples (algunos) ===
+examples/local-testing/
+examples/private/
+examples/development/
+
+# === Git files ===
+.git/
+.gitignore
+.gitattributes
+
+# === CI/CD files ===
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# === Environment ===
+.env*
+!.env.example
+
+# === Logs ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Dependencies ===
+node_modules/
+
+# === Cache ===
+.cache/
+.parcel-cache/
+.eslintcache
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Lock files (controversiales, pero mejor incluir solo package.json) ===
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDK Simple Auth - Vanilla JS Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 2rem auto;
+            padding: 1rem;
+            line-height: 1.6;
+        }
+        
+        .section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            font-size: 1.2rem;
+            color: #6c757d;
+        }
+        
+        .user-info {
+            background-color: #e8f5e8;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        input[type="email"], input[type="password"] {
+            width: 100%;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        button {
+            padding: 0.75rem 1rem;
+            margin: 0.25rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        pre {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 SDK Simple Auth - Demo</h1>
+    <p>Complete authentication example with Vanilla JavaScript</p>
+
+    <!-- Loading -->
+    <div id="loading" class="loading hidden">
+        Loading...
+    </div>
+
+    <!-- Error Messages -->
+    <div id="error" class="error hidden"></div>
+
+    <!-- Login Section -->
+    <div id="loginSection" class="section hidden">
+        <h2>Login</h2>
+        <form id="loginForm">
+            <div>
+                <label for="email">Email:</label>
+                <input 
+                    type="email" 
+                    id="email" 
+                    name="email" 
+                    required 
+                    placeholder="user@example.com"
+                    value="test@example.com"
+                >
+            </div>
+            
+            <div>
+                <label for="password">Password:</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    required 
+                    placeholder="••••••••"
+                    value="password123"
+                >
+            </div>
+            
+            <button type="submit" class="btn-primary">
+                Login
+            </button>
+        </form>
+        
+        <div style="margin-top: 1rem;">
+            <small>
+                <strong>Test credentials:</strong><br>
+                Email: test@example.com<br>
+                Password: password123
+            </small>
+        </div>
+    </div>
+
+    <!-- User Section -->
+    <div id="userSection" class="section hidden">
+        <div class="user-info">
+            <h2>Welcome!</h2>
+            <p><strong>Name:</strong> <span id="userName"></span></p>
+            <p><strong>Email:</strong> <span id="userEmail"></span></p>
+            <p><strong>ID:</strong> <span id="userId"></span></p>
+        </div>
+
+        <div>
+            <h3>Actions:</h3>
+            <button id="apiRequestBtn" class="btn-success">
+                Make Authenticated Request
+            </button>
+            
+            <button id="logoutBtn" class="btn-danger">
+                Logout
+            </button>
+        </div>
+
+        <!-- API Response -->
+        <div id="apiData" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Debug Section -->
+    <div class="section">
+        <h3>🛠️ Debug Tools</h3>
+        <p>These tools help you understand how the SDK works:</p>
+        
+        <button id="debugTokenBtn" class="btn-secondary">
+            Debug Token (console)
+        </button>
+        
+        <button id="debugSessionBtn" class="btn-secondary">
+            Debug Session (console)
+        </button>
+        
+        <div style="margin-top: 1rem;">
+            <small>
+                <strong>Tip:</strong> Open developer tools (F12) 
+                to see debug information in the console.
+            </small>
+        </div>
+    </div>
+
+    <!-- Documentation -->
+    <div class="section">
+        <h3>📚 Documentation</h3>
+        <p>This example shows:</p>
+        <ul>
+            <li>✅ Basic login/logout</li>
+            <li>✅ Authentication state management</li>
+            <li>✅ Authenticated requests</li>
+            <li>✅ Error handling</li>
+            <li>✅ Debug and troubleshooting</li>
+        </ul>
+        
+        <p><strong>Source code:</strong> <code>vanilla-js-example.js</code></p>
+    </div>
+
+    <!-- SDK Script -->
+    <script type="module" src="vanilla-js-example.js"></script>
+</body>
+</html>
