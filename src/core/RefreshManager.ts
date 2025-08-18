@@ -1,8 +1,8 @@
-import { AuthTokens, AuthConfig, HttpClient } from '../types';
-import { TokenExtractor } from './TokenManager';
-import { TokenHandler } from './TokenHandler';
-import { StorageManager } from './StorageManager';
+import { AuthConfig, AuthTokens, HttpClient } from '../types';
 import ExpirationHandler from './ExpirationHandler';
+import { StorageManager } from './StorageManager';
+import { TokenHandler } from './TokenHandler';
+import { TokenExtractor } from './TokenManager';
 
 /**
  * Enhanced RefreshManager with automatic session renewal and retry logic
@@ -11,9 +11,9 @@ export class RefreshManager {
   private config: Required<AuthConfig>;
   private storageManager: StorageManager;
   private httpClient: HttpClient;
-  
+
   // Refresh state management
-  private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private isRefreshing = false;
   private refreshPromise: Promise<AuthTokens> | null = null;
   private refreshAttempts = 0;
@@ -77,7 +77,7 @@ export class RefreshManager {
     const minimumLifetime = this.config.tokenRefresh.minimumTokenLifetime || 300;
     if (expiresInSeconds < minimumLifetime) {
       console.warn(`Token expires in ${expiresInSeconds}s (less than minimum ${minimumLifetime}s), using grace period`);
-      
+
       // Usar período de gracia para tokens de corta duración
       const gracePeriod = (this.config.tokenRefresh.gracePeriod || 60) * 1000;
       this.scheduleRefreshTimer(gracePeriod);
@@ -145,12 +145,12 @@ export class RefreshManager {
       return tokens;
     } catch (error) {
       console.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
-      
+
       // NUEVO: Only schedule retry if we haven't exceeded max retries
       if (this.refreshAttempts < this.config.tokenRefresh.maxRetries!) {
         const retryDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
         console.log(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries!} in ${retryDelay}ms`);
-        
+
         setTimeout(() => {
           // Only retry if we still have a refresh token
           this.storageManager.getStoredTokens().then(tokens => {
@@ -166,7 +166,7 @@ export class RefreshManager {
         console.error('Max retries exceeded, stopping refresh attempts');
         this.refreshAttempts = 0;
       }
-      
+
       throw error;
     } finally {
       this.isRefreshing = false;
@@ -183,7 +183,7 @@ export class RefreshManager {
     }
 
     const tokenInfo = TokenHandler.parseToken(token);
-    
+
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
       const now = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = tokenInfo.exp - now;
@@ -204,7 +204,7 @@ export class RefreshManager {
     }
 
     const tokenInfo = TokenHandler.parseToken(token);
-    
+
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
       const now = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = tokenInfo.exp - now;
@@ -283,6 +283,7 @@ export class RefreshManager {
         console.debug('Using Sanctum refresh method (Authorization header)');
         response = await this.httpClient.post(url, {
           refresh_token: refreshToken,
+          refreshToken: refreshToken
         }, {
           headers: {
             Authorization: `Bearer ${refreshToken}`
@@ -293,11 +294,12 @@ export class RefreshManager {
         console.debug('Using JWT refresh method (body only)');
         response = await this.httpClient.post(url, {
           refresh_token: refreshToken,
+          refreshToken: refreshToken
         });
       }
 
       const newTokens = this.processRefreshResponse(response, refreshToken);
-      
+
       // Store updated tokens with session renewal
       await this.storageManager.storeTokens(newTokens);
       await this.storageManager.updateLastRefreshTime();
@@ -316,16 +318,16 @@ export class RefreshManager {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Token refresh failed';
       console.error('Token refresh failed:', errorMessage);
-      
+
       // NUEVO: Si el servidor rechaza el refresh token, limpiar storage
-      if (errorMessage.includes('inválidos') || errorMessage.includes('invalid') || 
-          errorMessage.includes('expired') || errorMessage.includes('requerido')) {
+      if (errorMessage.includes('inválidos') || errorMessage.includes('invalid') ||
+        errorMessage.includes('expired') || errorMessage.includes('requerido')) {
         console.warn('Refresh token seems invalid, clearing authentication data');
         await this.storageManager.clearAll();
         // Reset refresh attempts to stop retry loops
         this.refreshAttempts = this.config.tokenRefresh.maxRetries!;
       }
-      
+
       this.onRefreshError?.(error instanceof Error ? error : new Error(errorMessage));
       throw error;
     }
