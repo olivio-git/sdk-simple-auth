@@ -1,6 +1,6 @@
 {
   "name": "sdk-simple-auth",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Universal JavaScript/TypeScript authentication SDK with multi-backend support, automatic token refresh, and React integration",
   "keywords": [
     "authentication",
