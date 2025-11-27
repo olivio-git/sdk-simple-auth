@@ -25,12 +25,36 @@ export interface AuthConfig {
   };
   httpClient?: HttpClient;
   
+  /**
+   * Enable debug mode for verbose logging
+   * @default false
+   */
+  debug?: boolean;
+
   // NUEVO: Configuración flexible para diferentes backends
   backend?: {
     type?: 'node-express' | 'laravel-sanctum' | 'jwt-standard' | 'custom';
     userSearchPaths?: string[];
     fieldMappings?: Record<string, string[]>;
     preserveOriginalData?: boolean;
+  };
+
+  // NUEVO: Configuración de validación de sesión
+  sessionValidation?: {
+    enabled?: boolean; // Habilitar validación automática
+    validateOnFocus?: boolean; // Validar cuando la app vuelve al foco
+    validateOnVisibility?: boolean; // Validar cuando la página se vuelve visible
+    maxInactivityTime?: number; // Tiempo máximo de inactividad en segundos antes de validar
+    autoLogoutOnInvalid?: boolean; // Cerrar sesión automáticamente si es inválida
+    validateOnStartup?: boolean; // Validar sesión al iniciar la aplicación
+  };
+
+  // NUEVO: Configuración de interceptores HTTP
+  interceptors?: {
+    enabled?: boolean; // Habilitar interceptores automáticos
+    autoInjectToken?: boolean; // Inyectar token automáticamente en requests
+    handleAuthErrors?: boolean; // Manejar 401/422 automáticamente
+    axiosInstance?: any; // Instancia de Axios (opcional)
   };
 }
  
@@ -167,12 +191,14 @@ export interface AuthCallbacks {
   onLogout?: () => void;
   onError?: (error: string) => void;
   onTokenExpired?: () => void;
-  
+
   // NUEVO: Callbacks adicionales
   onSessionRestored?: (user: AuthUser) => void;
   onRefreshFailed?: (error: string) => void;
   onUserUpdated?: (user: AuthUser) => void;
   onBackendDetected?: (backendType: string) => void;
+  onSessionInvalid?: () => void; // Cuando la sesión es inválida en el servidor
+  onSessionValidated?: () => void; // Cuando se valida exitosamente la sesión
 }
 
 // NUEVO: Información extendida de sesión

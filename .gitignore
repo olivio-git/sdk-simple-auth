@@ -131,3 +131,7 @@ rebuild_clean.sh
 rebuild_fixed.sh
 test_and_publish.sh
 verify_build.js
+
+AXIOS_INTERCEPTORS.md
+SESSION_VALIDATION.md
+DESARROLLO.md

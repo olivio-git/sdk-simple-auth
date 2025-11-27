@@ -11,6 +11,8 @@ export { IndexedDBAdapter } from './storage/IndexedDBAdapter';
 export { TokenExtractor } from './core/TokenManager';
 export { StorageManager } from './core/StorageManager';
 export { RefreshManager } from './core/RefreshManager';
+export { SessionValidator } from './core/SessionValidator';
+export { AxiosInterceptorManager } from './core/AxiosInterceptorManager';
 
 export type { StorageAdapter } from './storage/StorageAdapter';
  

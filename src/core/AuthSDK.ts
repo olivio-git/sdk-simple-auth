@@ -1,9 +1,12 @@
-import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient, LoginCredentials, RegisterData, ExtendedSessionInfo } from '../types';
-import { TokenExtractor } from './TokenManager';
-import { StorageManager } from './StorageManager';
-import { RefreshManager } from './RefreshManager';
-import { TokenHandler } from './TokenHandler';
+import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, ExtendedSessionInfo, HttpClient, LoginCredentials, RegisterData } from '../types';
+import { AxiosInterceptorManager } from './AxiosInterceptorManager';
 import ExpirationHandler from './ExpirationHandler';
+import { Logger } from './Logger';
+import { RefreshManager } from './RefreshManager';
+import { SessionValidator } from './SessionValidator';
+import { StorageManager } from './StorageManager';
+import { TokenHandler } from './TokenHandler';
+import { TokenExtractor } from './TokenManager';
 
 // Type for state change listeners
 type StateChangeListener = (state: AuthState) => void;
@@ -15,11 +18,13 @@ export class AuthSDK {
   private config: Required<AuthConfig>;
   private state: AuthState;
   private callbacks: AuthCallbacks;
-  
+
   // Managers
   private storageManager: StorageManager;
   private refreshManager: RefreshManager;
-  
+  private sessionValidator: SessionValidator | null = null;
+  private axiosInterceptorManager: AxiosInterceptorManager | null = null;
+
   // Session management
   private expirationTimer: NodeJS.Timeout | null = null;
   private stateChangeListeners: StateChangeListener[] = [];
@@ -30,6 +35,9 @@ export class AuthSDK {
     this.callbacks = callbacks || {};
 
     // Initialize managers
+    // Initialize Logger
+    Logger.setDebugMode(this.config.debug || false);
+
     this.storageManager = new StorageManager(this.config.storage);
     this.refreshManager = new RefreshManager(
       this.config,
@@ -63,6 +71,40 @@ export class AuthSDK {
         supportsBiometric: false
       }
     };
+
+    // Initialize SessionValidator if enabled
+    if (this.config.sessionValidation.enabled && SessionValidator.isSupported()) {
+      this.sessionValidator = new SessionValidator(
+        this.config.sessionValidation,
+        () => this.validateSession()
+      );
+    }
+
+    // Initialize AxiosInterceptorManager if Axios instance is provided
+    if (this.config.interceptors.enabled && this.config.interceptors.axiosInstance) {
+      this.axiosInterceptorManager = new AxiosInterceptorManager(
+        this.config.interceptors.axiosInstance,
+        {
+          getAccessToken: () => this.getValidAccessToken(),
+          onSessionInvalid: async () => {
+            console.warn('Axios interceptor detected invalid session');
+            await this.clearSession();
+            this.callbacks.onSessionInvalid?.();
+          },
+          onTokenRefresh: async () => {
+            await this.refreshTokens();
+          }
+        }
+      );
+
+      // Configurar interceptores
+      this.axiosInterceptorManager.setup({
+        autoInjectToken: this.config.interceptors.autoInjectToken,
+        handleAuthErrors: this.config.interceptors.handleAuthErrors
+      });
+
+      console.log('✅ Axios interceptors initialized');
+    }
 
     // Initialize from storage
     this.initializeFromStorage();
@@ -101,11 +143,28 @@ export class AuthSDK {
         ...config.tokenRefresh,
       },
       httpClient: config.httpClient || this.createDefaultHttpClient(),
+      debug: config.debug || false,
       backend: {
         type: config.backend?.type || 'jwt-standard',
         userSearchPaths: config.backend?.userSearchPaths || ['user', 'data.user'],
         fieldMappings: config.backend?.fieldMappings || {},
         preserveOriginalData: config.backend?.preserveOriginalData ?? false,
+      },
+      sessionValidation: {
+        enabled: true,
+        validateOnFocus: true,
+        validateOnVisibility: true,
+        maxInactivityTime: 300, // 5 minutos
+        autoLogoutOnInvalid: true,
+        validateOnStartup: true,
+        ...config.sessionValidation,
+      },
+      interceptors: {
+        enabled: false, // Deshabilitado por defecto
+        autoInjectToken: true,
+        handleAuthErrors: true,
+        axiosInstance: undefined,
+        ...config.interceptors,
       },
     };
   }
@@ -228,6 +287,17 @@ export class AuthSDK {
   }
 
   /**
+   * Clear local session without calling backend
+   * Useful when the server has already invalidated the session (401/422)
+   */
+  async clearLocalSession(): Promise<void> {
+    console.debug('Clearing local session only (no backend call)');
+    await this.clearSession();
+    this.callbacks.onLogout?.();
+    console.debug('Local session cleared');
+  }
+
+  /**
    * Enhanced token refresh with session renewal
    */
   async refreshTokens(): Promise<AuthTokens> {
@@ -291,6 +361,50 @@ export class AuthSDK {
     }
 
     return this.isTokenValid(this.state.tokens.accessToken);
+  }
+
+  /**
+   * Validate current session with the server using refresh token
+   * This is called automatically when the app regains focus/visibility
+   */
+  async validateSession(): Promise<boolean> {
+    Logger.debug('Validating session with server...');
+
+    // Si no hay sesión activa, no hay nada que validar
+    if (!this.state.isAuthenticated || !this.state.tokens) {
+      console.debug('No active session to validate');
+      return false;
+    }
+
+    // Si no hay refresh token, no podemos validar con el servidor
+    if (!this.config.tokenRefresh.enabled || !this.state.tokens.refreshToken) {
+      console.debug('Cannot validate session: refresh token not available');
+      // Para tokens sin refresh, asumir válidos hasta que fallen en una petición
+      return true;
+    }
+
+    try {
+      // Intentar refrescar el token como forma de validación
+      // Si el servidor acepta el refresh token, la sesión es válida
+      await this.refreshTokens();
+
+      Logger.debug('Session validated successfully');
+      this.callbacks.onSessionValidated?.();
+
+      return true;
+
+    } catch (error) {
+      Logger.warn('Session validation failed:', error);
+
+      // Si falla el refresh, la sesión es inválida
+      if (this.config.sessionValidation.autoLogoutOnInvalid) {
+        Logger.debug('Auto-logout due to invalid session');
+        await this.clearSession();
+        this.callbacks.onSessionInvalid?.();
+      }
+
+      return false;
+    }
   }
 
   /**
@@ -501,7 +615,7 @@ export class AuthSDK {
       if (storedTokens?.accessToken && storedUser) {
         // Validate token before establishing session
         const isValid = await this.isTokenValid(storedTokens.accessToken);
-        
+
         if (isValid) {
           this.state = {
             isAuthenticated: true,
@@ -518,6 +632,33 @@ export class AuthSDK {
 
           // Schedule expiration handling
           this.scheduleTokenExpiration(storedTokens);
+
+          // Start session validation listeners
+          if (this.sessionValidator) {
+            this.sessionValidator.startListening();
+            console.debug('Session validation listeners started');
+          }
+
+          // NUEVO: Validar sesión al inicio si está habilitado
+          if (this.config.sessionValidation.validateOnStartup) {
+            Logger.debug('Performing startup session validation...');
+            // No esperamos a que termine para no bloquear la UI inicial, pero
+            // si falla, cerrará la sesión
+            this.validateSession().then(isValid => {
+              if (!isValid) {
+                Logger.warn('Startup session validation failed, logging out');
+                // El logout ya se maneja dentro de validateSession si autoLogoutOnInvalid es true
+                // pero por seguridad forzamos si no lo es
+                if (!this.config.sessionValidation.autoLogoutOnInvalid) {
+                   this.clearSession();
+                }
+              } else {
+                Logger.debug('Startup session validation successful');
+              }
+            }).catch(err => {
+              Logger.error('Error during startup session validation:', err);
+            });
+          }
 
           // console.debug('Session restored from storage');
         } else {
@@ -564,6 +705,12 @@ export class AuthSDK {
     // Schedule expiration handling
     this.scheduleTokenExpiration(tokens);
 
+    // Start session validation listeners
+    if (this.sessionValidator) {
+      this.sessionValidator.startListening();
+      console.debug('Session validation listeners started');
+    }
+
     this.notifyStateChange();
   }
 
@@ -571,6 +718,12 @@ export class AuthSDK {
    * Clear current session completely
    */
   private async clearSession(): Promise<void> {
+    // Stop session validation listeners
+    if (this.sessionValidator) {
+      this.sessionValidator.stopListening();
+      console.debug('Session validation listeners stopped');
+    }
+
     // Clear storage
     await this.storageManager.clearAll();
 

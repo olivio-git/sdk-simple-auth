@@ -1,7 +1,7 @@
-import { AuthTokens, AuthUser, AuthConfig } from '../types';
-import { StorageAdapter } from '../storage/StorageAdapter';
-import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
 import { IndexedDBAdapter } from '../storage/IndexedDBAdapter';
+import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
+import { StorageAdapter } from '../storage/StorageAdapter';
+import { AuthConfig, AuthTokens, AuthUser } from '../types';
 
 /**
  * Enhanced StorageManager with session persistence and automatic cleanup

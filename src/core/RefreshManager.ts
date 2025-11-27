@@ -1,8 +1,9 @@
 import { AuthConfig, AuthTokens, HttpClient } from '../types';
 import ExpirationHandler from './ExpirationHandler';
+import { Logger } from './Logger';
 import { StorageManager } from './StorageManager';
+import TokenExtractor from './TokenExtractor';
 import { TokenHandler } from './TokenHandler';
-import { TokenExtractor } from './TokenManager';
 
 /**
  * Enhanced RefreshManager with automatic session renewal and retry logic
@@ -253,6 +254,28 @@ export class RefreshManager {
   }
 
   /**
+   * Detect if error is an authentication error (401, 403, etc)
+   */
+  private isAuthenticationError(error: any): boolean {
+    // Check for Axios error format
+    if (error?.response?.status) {
+      const status = error.response.status;
+      return status === 401 || status === 403;
+    }
+
+    // Check for Fetch error (our default httpClient)
+    if (error?.message) {
+      const msg = error.message.toLowerCase();
+      return msg.includes('401') ||
+             msg.includes('403') ||
+             msg.includes('unauthorized') ||
+             msg.includes('unauthenticated');
+    }
+
+    return false;
+  }
+
+  /**
    * Private method to perform the actual refresh
    */
   private async performRefresh(): Promise<AuthTokens> {
@@ -319,10 +342,15 @@ export class RefreshManager {
       const errorMessage = error instanceof Error ? error.message : 'Token refresh failed';
       console.error('Token refresh failed:', errorMessage);
 
-      // NUEVO: Si el servidor rechaza el refresh token, limpiar storage
-      if (errorMessage.includes('inválidos') || errorMessage.includes('invalid') ||
-        errorMessage.includes('expired') || errorMessage.includes('requerido')) {
-        console.warn('Refresh token seems invalid, clearing authentication data');
+      // Detectar si es un error de autenticación (401, 403)
+      const isAuthError = this.isAuthenticationError(error);
+
+      // Si el servidor rechaza el refresh token, limpiar storage
+      if (isAuthError ||
+          errorMessage.includes('inválidos') || errorMessage.includes('invalid') ||
+          errorMessage.includes('expired') || errorMessage.includes('requerido') ||
+          errorMessage.includes('Unauthorized') || errorMessage.includes('Unauthenticated')) {
+        console.warn('Refresh token invalid or expired, clearing authentication data');
         await this.storageManager.clearAll();
         // Reset refresh attempts to stop retry loops
         this.refreshAttempts = this.config.tokenRefresh.maxRetries!;
@@ -349,9 +377,7 @@ export class RefreshManager {
       return tokens;
 
     } catch (error) {
-      console.error('Error processing refresh response:', error);
-      // Debug the response structure
-      TokenExtractor.debugResponse(response);
+      Logger.error('Error processing refresh response:', error);
       throw new Error('Invalid refresh response format');
     }
   }
