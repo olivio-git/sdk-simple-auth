@@ -3,6 +3,7 @@ import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
 import { StorageAdapter } from '../storage/StorageAdapter';
 import { AuthConfig, AuthTokens, AuthUser } from '../types';
 import { Logger } from './Logger';
+import { version as SDK_VERSION } from '../../package.json';
 
 /**
  * Enhanced StorageManager with session persistence and automatic cleanup
@@ -40,7 +41,7 @@ export class StorageManager {
         ...tokens,
         storedAt: now,
         lastRefreshed: now,
-        version: '1.2.3', // SDK version for migration purposes
+        version: SDK_VERSION,
         sessionId: this.generateSessionId()
       };
 

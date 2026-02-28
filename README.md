@@ -250,7 +250,7 @@ const auth = new AuthSDK({
   // Auto refresh
   tokenRefresh: {
     enabled: true,
-    bufferTime: 300, // Refresh 5 min before expiry
+    bufferTime: 900, // Refresh 15 min before expiry (default)
     maxRetries: 3
   },
   
