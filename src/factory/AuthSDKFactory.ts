@@ -1,5 +1,6 @@
 import { AuthSDK } from '../core/AuthSDK';
 import { Logger } from '../core/Logger';
+import { TokenExtractor } from '../core/TokenManager';
 import { AuthConfig } from '../types';
 import { EnhancedAuthConfig, BACKEND_PRESETS, ResponseAnalysis, BackendPresets } from '../types/enhanced_types';
 
@@ -110,7 +111,6 @@ export class AuthSDKFactory {
 
     // Intentar extracción real
     try {
-      const { TokenExtractor } = require('../core/TokenManager');
       TokenExtractor.extractTokens(response);
       analysis.extraction.tokensExtracted = true;
     } catch (error) {
@@ -118,7 +118,6 @@ export class AuthSDKFactory {
     }
 
     try {
-      const { TokenExtractor } = require('../core/TokenManager');
       const user = TokenExtractor.extractUser(response);
       analysis.extraction.userExtracted = !!user;
     } catch (error) {
@@ -144,9 +143,6 @@ export class AuthSDKFactory {
       console.log(`\n🔧 Testing with ${backendType} preset...`);
       
       try {
-        // Usar el TokenExtractor directamente para testing
-        const { TokenExtractor } = require('../core/TokenManager');
-        
         const tokens = TokenExtractor.extractTokens(response);
         const user = TokenExtractor.extractUser(response);
         
