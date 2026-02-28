@@ -462,6 +462,7 @@ export class AuthSDK {
    * Debug token information
    */
   debugToken(token?: string): void {
+    if (!this.config.debug) return;
     const targetToken = token || this.state.tokens?.accessToken;
     if (!targetToken) {
       console.log('No token to debug');
@@ -492,6 +493,7 @@ export class AuthSDK {
    * Debug API response structure
    */
   debugResponse(response: any): void {
+    if (!this.config.debug) return;
     console.group('🔍 API Response Debug');
     TokenExtractor.debugResponse(response);
 
@@ -570,6 +572,7 @@ export class AuthSDK {
    * Test extraction with mock response (debugging)
    */
   testExtraction(response: any): void {
+    if (!this.config.debug) return;
     console.group('🧪 Testing Token and User Extraction');
     
     try {
@@ -881,13 +884,19 @@ export class AuthSDK {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ 
-          message: `HTTP ${response.status}: ${response.statusText}` 
+        const error = await response.json().catch(() => ({
+          message: `HTTP ${response.status}: ${response.statusText}`
         }));
         throw new Error(error.message || `Request failed with status ${response.status}`);
       }
 
-      return response.json();
+      const text = await response.text();
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Expected JSON response but received non-JSON content (status ${response.status})`);
+      }
     };
 
     return {
@@ -962,6 +971,7 @@ export class AuthSDK {
    * NUEVO: Debug current session with comprehensive info
    */
   debugSession(): void {
+    if (!this.config.debug) return;
     console.group('🔍 Enhanced Session Debug');
     
     console.log('📊 Current State:', this.getState());

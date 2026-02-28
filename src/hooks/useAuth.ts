@@ -1,12 +1,35 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthSDK } from '../core/AuthSDK';
 import { Logger } from '../core/Logger';
-import { AuthState, LoginCredentials, RegisterData, AuthTokens } from '../types';
+import { AuthState, AuthTokens, AuthUser, LoginCredentials, RegisterData } from '../types';
+
+type SessionInfo = {
+  isValid: boolean;
+  refreshAvailable: boolean;
+  sessionId: string | null;
+} | null;
+
+export type UseAuthReturn = AuthState & {
+  sessionInfo: SessionInfo;
+  login: (credentials: LoginCredentials) => Promise<AuthUser>;
+  register: (userData: RegisterData) => Promise<AuthUser | null>;
+  logout: () => Promise<void>;
+  refreshTokens: () => Promise<AuthTokens>;
+  forceRefreshTokens: () => Promise<AuthTokens>;
+  getAuthHeaders: () => Promise<Record<string, string>>;
+  getValidAccessToken: () => Promise<string | null>;
+  checkAuthStatus: () => Promise<boolean>;
+  debugToken: (token?: string) => void;
+  debugResponse: (response: unknown) => void;
+  hasValidSession: boolean | undefined;
+  canRefresh: boolean;
+  sessionId: string | null;
+};
 
 /**
  * Enhanced useAuth hook with better error handling and loading states
  */
-export function useAuth(authSDK: AuthSDK) {
+export function useAuth(authSDK: AuthSDK): UseAuthReturn {
   const [authState, setAuthState] = useState<AuthState>(authSDK.getState());
   const [sessionInfo, setSessionInfo] = useState<{
     isValid: boolean;

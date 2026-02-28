@@ -118,10 +118,12 @@ export class TokenExtractor {
   /**
    * Genera una signatura única del objeto para cache
    */
-  private static generateObjectSignature(obj: any): string {
+  private static generateObjectSignature(obj: Record<string, unknown>): string {
     try {
-      const keys = Object.keys(obj).sort().slice(0, 10); // Primeras 10 keys para performance
-      return keys.join(',');
+      const keys = Object.keys(obj).sort();
+      // Include truncated values so objects with same keys but different data
+      // produce different signatures and don't collide in the cache.
+      return keys.map(k => `${k}:${String(obj[k]).slice(0, 8)}`).join(',');
     } catch {
       return 'unknown';
     }
