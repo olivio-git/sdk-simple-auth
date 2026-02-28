@@ -1,22 +1,124 @@
-import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, HttpClient, LoginCredentials, RegisterData } from '../types';
+import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, ExtendedSessionInfo, HttpClient, LoginCredentials, RegisterData } from '../types';
+import { AxiosInterceptorManager } from './AxiosInterceptorManager';
+import ExpirationHandler from './ExpirationHandler';
+import { Logger } from './Logger';
+import { RefreshManager } from './RefreshManager';
+import { SessionValidator } from './SessionValidator';
+import { StorageManager } from './StorageManager';
+import { TokenHandler } from './TokenHandler';
+import { TokenExtractor } from './TokenManager';
 
-// Tipo para el callback de suscripción
+// Type for state change listeners
 type StateChangeListener = (state: AuthState) => void;
 
-class AuthSDK {
+/**
+ * Refactored AuthSDK with improved modularity and session management
+ */
+export class AuthSDK {
   private config: Required<AuthConfig>;
   private state: AuthState;
   private callbacks: AuthCallbacks;
-  private refreshTimer: NodeJS.Timeout | null = null;
-  private isRefreshing = false;
-  private refreshPromise: Promise<AuthTokens> | null = null;
-  
-  // Array para almacenar los listeners de cambio de estado
+
+  // Managers
+  private storageManager: StorageManager;
+  private refreshManager: RefreshManager;
+  private sessionValidator: SessionValidator | null = null;
+  private axiosInterceptorManager: AxiosInterceptorManager | null = null;
+
+  // Session management
+  private expirationTimer: NodeJS.Timeout | null = null;
   private stateChangeListeners: StateChangeListener[] = [];
+  private isInitialized = false;
+  public readonly ready: Promise<void>;
+  private logger: Logger;
 
   constructor(config: AuthConfig, callbacks?: AuthCallbacks) {
-    // Configuración por defecto
-    this.config = {
+    this.config = this.buildConfig(config);
+    this.callbacks = callbacks || {};
+
+    // Create per-instance logger
+    this.logger = new Logger(this.config.debug || false);
+
+    this.storageManager = new StorageManager(this.config.storage, this.logger);
+    this.refreshManager = new RefreshManager(
+      this.config,
+      this.storageManager,
+      this.config.httpClient,
+      {
+        onTokenRefresh: (tokens) => {
+          this.handleTokenRefresh(tokens);
+        },
+        onRefreshError: (error) => {
+          this.callbacks.onError?.(error.message);
+        },
+        onSessionRenewed: (tokens) => {
+          this.callbacks.onTokenRefresh?.(tokens);
+        }
+      },
+      this.logger
+    );
+
+    // Initial state
+    this.state = {
+      isAuthenticated: false,
+      user: null,
+      tokens: null,
+      loading: false,
+      error: null,
+      backendType: 'unknown',
+      capabilities: {
+        canRefresh: Boolean(this.config.tokenRefresh?.enabled),
+        hasProfile: true,
+        supportsOTP: false,
+        supportsBiometric: false
+      }
+    };
+
+    // Initialize SessionValidator if enabled
+    if (this.config.sessionValidation.enabled && SessionValidator.isSupported()) {
+      this.sessionValidator = new SessionValidator(
+        this.config.sessionValidation,
+        () => this.validateSession(),
+        this.logger
+      );
+    }
+
+    // Initialize AxiosInterceptorManager if Axios instance is provided
+    if (this.config.interceptors.enabled && this.config.interceptors.axiosInstance) {
+      this.axiosInterceptorManager = new AxiosInterceptorManager(
+        this.config.interceptors.axiosInstance,
+        {
+          getAccessToken: () => this.getValidAccessToken(),
+          onSessionInvalid: async () => {
+            this.logger.warn('Axios interceptor detected invalid session');
+            await this.clearSession();
+            this.callbacks.onSessionInvalid?.();
+          },
+          onTokenRefresh: async () => {
+            await this.refreshTokens();
+          }
+        },
+        this.logger
+      );
+
+      // Configurar interceptores
+      this.axiosInterceptorManager.setup({
+        autoInjectToken: this.config.interceptors.autoInjectToken,
+        handleAuthErrors: this.config.interceptors.handleAuthErrors
+      });
+
+      this.logger.debug('Axios interceptors initialized');
+    }
+
+    // Initialize from storage
+    this.ready = this.initializeFromStorage();
+  }
+
+  /**
+   * Build complete configuration with defaults
+   */
+  private buildConfig(config: AuthConfig): Required<AuthConfig> {
+    return {
       authServiceUrl: config.authServiceUrl,
       endpoints: {
         login: '/auth/login',
@@ -27,6 +129,10 @@ class AuthSDK {
         ...config.endpoints,
       },
       storage: {
+        type: 'indexedDB',
+        dbName: 'AuthSDK',
+        dbVersion: 1,
+        storeName: 'auth_data',
         tokenKey: 'auth_access_token',
         refreshTokenKey: 'auth_refresh_token',
         userKey: 'auth_user',
@@ -34,156 +140,43 @@ class AuthSDK {
       },
       tokenRefresh: {
         enabled: true,
-        bufferTime: 900, // 15 minutos
+        bufferTime: 900, // 15 minutes
         maxRetries: 3,
+        minimumTokenLifetime: 300, // 5 minutos mínimo
+        gracePeriod: 60, // 1 minuto de gracia
         ...config.tokenRefresh,
       },
-      httpClient: config.httpClient || this.createDefaultFetchClient(),
-    };
-
-    this.callbacks = callbacks || {};
-
-    // Estado inicial
-    this.state = {
-      isAuthenticated: false,
-      user: null,
-      tokens: null,
-      loading: false,
-      error: null,
-    };
-
-    // Inicializar desde storage
-    this.initializeFromStorage();
-  }
-
-  // NUEVO MÉTODO: Suscribirse a cambios de estado
-  public onAuthStateChanged(listener: StateChangeListener): () => void {
-    // Agregar el listener al array
-    this.stateChangeListeners.push(listener);
-    
-    // Llamar inmediatamente con el estado actual
-    listener(this.getState());
-    
-    // Retornar función para cancelar la suscripción
-    return () => {
-      const index = this.stateChangeListeners.indexOf(listener);
-      if (index > -1) {
-        this.stateChangeListeners.splice(index, 1);
-      }
-    };
-  }
-
-  // Cliente HTTP por defecto usando fetch
-  private createDefaultFetchClient(): HttpClient {
-    return {
-      async post(url: string, data?: any, config?: any) {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...config?.headers,
-          },
-          body: data ? JSON.stringify(data) : undefined,
-          ...config,
-        });
-        
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ message: 'Request failed' }));
-          throw new Error(error.message || `HTTP ${response.status}`);
-        }
-        
-        return response.json();
+      httpClient: config.httpClient || this.createDefaultHttpClient(),
+      debug: config.debug || false,
+      backend: {
+        type: config.backend?.type || 'jwt-standard',
+        userSearchPaths: config.backend?.userSearchPaths || ['user', 'data.user'],
+        fieldMappings: config.backend?.fieldMappings || {},
+        preserveOriginalData: config.backend?.preserveOriginalData ?? false,
       },
-      
-      async get(url: string, config?: any) {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            ...config?.headers,
-          },
-          ...config,
-        });
-        
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ message: 'Request failed' }));
-          throw new Error(error.message || `HTTP ${response.status}`);
-        }
-        
-        return response.json();
+      sessionValidation: {
+        enabled: true,
+        validateOnFocus: true,
+        validateOnVisibility: true,
+        maxInactivityTime: 300, // 5 minutos
+        autoLogoutOnInvalid: true,
+        validateOnStartup: true,
+        ...config.sessionValidation,
       },
-      
-      async put(url: string, data?: any, config?: any) {
-        const response = await fetch(url, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            ...config?.headers,
-          },
-          body: data ? JSON.stringify(data) : undefined,
-          ...config,
-        });
-        
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ message: 'Request failed' }));
-          throw new Error(error.message || `HTTP ${response.status}`);
-        }
-        
-        return response.json();
-      },
-      
-      async delete(url: string, config?: any) {
-        const response = await fetch(url, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            ...config?.headers,
-          },
-          ...config,
-        });
-        
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ message: 'Request failed' }));
-          throw new Error(error.message || `HTTP ${response.status}`);
-        }
-        
-        return response.json();
+      interceptors: {
+        enabled: false, // Deshabilitado por defecto
+        autoInjectToken: true,
+        handleAuthErrors: true,
+        axiosInstance: undefined,
+        ...config.interceptors,
       },
     };
   }
 
-  // Inicializar desde localStorage
-  private initializeFromStorage(): void {
-    try {
-      const storedTokens = this.getStoredTokens();
-      const storedUser = this.getStoredUser();
-
-      if (storedTokens && storedUser && this.isTokenValid(storedTokens.accessToken)) {
-        this.state = {
-          isAuthenticated: true,
-          user: storedUser,
-          tokens: storedTokens,
-          loading: false,
-          error: null,
-        };
-
-        // Programar refresh automático
-        if (this.config.tokenRefresh.enabled) {
-          this.scheduleTokenRefresh(storedTokens.accessToken);
-        }
-
-        this.notifyStateChange();
-      } else {
-        this.clearStorage();
-      }
-    } catch (error) {
-      console.error('Error initializing from storage:', error);
-      this.clearStorage();
-    }
-  }
-
-  // Métodos públicos principales
-  public async login(credentials: LoginCredentials): Promise<AuthUser> {
+  /**
+   * Enhanced login with automatic session establishment
+   */
+  async login(credentials: LoginCredentials): Promise<AuthUser> {
     this.setLoading(true);
     this.setError(null);
 
@@ -191,37 +184,20 @@ class AuthSDK {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.login}`;
       const response = await this.config.httpClient.post(url, credentials);
 
-      const tokens: AuthTokens = {
-        accessToken: response.access_token || response.accessToken,
-        refreshToken: response.refresh_token || response.refreshToken,
-        expiresIn: response.expires_in || response.expiresIn,
-        tokenType: response.token_type || response.tokenType || 'Bearer',
-      };
+      const tokens = TokenExtractor.extractTokens(response);
+      const user = TokenExtractor.extractUser(response);
 
-      const user: AuthUser = response.user || this.parseTokenPayload(tokens.accessToken);
-
-      // Guardar en storage
-      this.storeTokens(tokens);
-      this.storeUser(user);
-
-      // Actualizar estado
-      this.state = {
-        isAuthenticated: true,
-        user,
-        tokens,
-        loading: false,
-        error: null,
-      };
-
-      // Programar refresh automático
-      if (this.config.tokenRefresh.enabled) {
-        this.scheduleTokenRefresh(tokens.accessToken);
+      if (!user) {
+        throw new Error('No user information found in login response');
       }
 
-      this.notifyStateChange();
+      await this.establishSession(tokens, user);
+
       this.callbacks.onLogin?.(user, tokens);
+      this.logger.debug('Login successful, session established');
 
       return user;
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
       this.setError(errorMessage);
@@ -232,7 +208,10 @@ class AuthSDK {
     }
   }
 
-  public async register(userData: RegisterData): Promise<AuthUser> {
+  /**
+   * Enhanced register with automatic session establishment when tokens are provided
+   */
+  async register(userData: RegisterData): Promise<AuthUser> {
     this.setLoading(true);
     this.setError(null);
 
@@ -240,39 +219,41 @@ class AuthSDK {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.register}`;
       const response = await this.config.httpClient.post(url, userData);
 
-      // Después del registro, hacer login automático si se devuelven tokens
-      if (response.access_token || response.accessToken) {
-        const tokens: AuthTokens = {
-          accessToken: response.access_token || response.accessToken,
-          refreshToken: response.refresh_token || response.refreshToken,
-          expiresIn: response.expires_in || response.expiresIn,
-          tokenType: response.token_type || response.tokenType || 'Bearer',
-        };
+      // Try to extract tokens - some APIs provide immediate authentication
+      try {
+        const tokens = TokenExtractor.extractTokens(response);
+        const user = TokenExtractor.extractUser(response);
 
-        const user: AuthUser = response.user || this.parseTokenPayload(tokens.accessToken);
-
-        this.storeTokens(tokens);
-        this.storeUser(user);
-
-        this.state = {
-          isAuthenticated: true,
-          user,
-          tokens,
-          loading: false,
-          error: null,
-        };
-
-        if (this.config.tokenRefresh.enabled) {
-          this.scheduleTokenRefresh(tokens.accessToken);
+        if (!user) {
+          throw new Error('No user information found in register response');
         }
 
-        this.notifyStateChange();
+        // If tokens are provided, establish session immediately
+        await this.establishSession(tokens, user);
+
         this.callbacks.onLogin?.(user, tokens);
+        this.logger.debug('Registration successful with automatic login');
+
+        return user;
+
+      } catch (tokenError) {
+        // If no tokens, registration was successful but requires separate login
+        this.logger.debug('Registration successful, manual login required');
+        
+        const user = TokenExtractor.extractUser(response);
+        
+        if (!user) {
+          // Return basic user info if available
+          return {
+            id: 'unknown',
+            name: userData.name || userData.email || 'User',
+            email: userData.email
+          };
+        }
 
         return user;
       }
 
-      return response.user;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Registration failed';
       this.setError(errorMessage);
@@ -283,135 +264,193 @@ class AuthSDK {
     }
   }
 
-  public async logout(): Promise<void> {
+  /**
+   * Enhanced logout with complete session cleanup
+   */
+  async logout(): Promise<void> {
     try {
-      // Intentar hacer logout en el servidor
+      // Attempt server-side logout if token is available
       if (this.state.tokens?.accessToken) {
-        const url = `${this.config.authServiceUrl}${this.config.endpoints.logout}`;
-        await this.config.httpClient.post(url, {}, {
-          headers: {
-            Authorization: `Bearer ${this.state.tokens.accessToken}`,
-          },
-        }).catch(() => {
-          // Ignorar errores del servidor en logout
-        });
+        try {
+          const url = `${this.config.authServiceUrl}${this.config.endpoints.logout}`;
+          await this.config.httpClient.post(url, {}, {
+            headers: {
+              Authorization: `Bearer ${this.state.tokens.accessToken}`,
+            },
+          });
+          this.logger.debug('Server-side logout successful');
+        } catch (error) {
+          this.logger.warn('Server-side logout failed, continuing with client-side cleanup:', error);
+        }
       }
     } finally {
-      // Limpiar estado local siempre
-      this.clearStorage();
-      this.clearRefreshTimer();
-
-      this.state = {
-        isAuthenticated: false,
-        user: null,
-        tokens: null,
-        loading: false,
-        error: null,
-      };
-
-      this.notifyStateChange();
+      await this.clearSession();
       this.callbacks.onLogout?.();
+      this.logger.debug('Logout completed, session cleared');
     }
   }
 
-  public async refreshTokens(): Promise<AuthTokens> {
-    // Evitar múltiples refreshes simultáneos
-    if (this.isRefreshing && this.refreshPromise) {
-      return this.refreshPromise;
-    }
-
-    this.isRefreshing = true;
-    this.refreshPromise = this.performTokenRefresh();
-
-    try {
-      const tokens = await this.refreshPromise;
-      return tokens;
-    } finally {
-      this.isRefreshing = false;
-      this.refreshPromise = null;
-    }
+  /**
+   * Clear local session without calling backend
+   * Useful when the server has already invalidated the session (401/422)
+   */
+  async clearLocalSession(): Promise<void> {
+    this.logger.debug('Clearing local session only (no backend call)');
+    await this.clearSession();
+    this.callbacks.onLogout?.();
+    this.logger.debug('Local session cleared');
   }
 
-  private async performTokenRefresh(): Promise<AuthTokens> {
-    const refreshToken = this.state.tokens?.refreshToken;
+  /**
+   * Enhanced token refresh with session renewal
+   */
+  async refreshTokens(): Promise<AuthTokens> {
+    return this.refreshManager.refreshTokens();
+  }
 
-    if (!refreshToken) {
-      throw new Error('No refresh token available');
+  /**
+   * Subscribe to authentication state changes
+   */
+  onAuthStateChanged(listener: StateChangeListener): () => void {
+    this.stateChangeListeners.push(listener);
+
+    // Call immediately with current state
+    if (this.isInitialized) {
+      listener(this.getState());
     }
 
-    try {
-      const url = `${this.config.authServiceUrl}${this.config.endpoints.refresh}`;
-      const response = await this.config.httpClient.post(url, {
-        refresh_token: refreshToken,
-      });
-
-      const tokens: AuthTokens = {
-        accessToken: response.access_token || response.accessToken,
-        refreshToken: response.refresh_token || response.refreshToken || refreshToken,
-        expiresIn: response.expires_in || response.expiresIn,
-        tokenType: response.token_type || response.tokenType || 'Bearer',
-      };
-
-      // Actualizar storage y estado
-      this.storeTokens(tokens);
-      this.state.tokens = tokens;
-
-      // Programar próximo refresh
-      if (this.config.tokenRefresh.enabled) {
-        this.scheduleTokenRefresh(tokens.accessToken);
+    // Return unsubscribe function
+    return () => {
+      const index = this.stateChangeListeners.indexOf(listener);
+      if (index > -1) {
+        this.stateChangeListeners.splice(index, 1);
       }
-
-      this.notifyStateChange();
-      this.callbacks.onTokenRefresh?.(tokens);
-
-      return tokens;
-    } catch (error) {
-      // Si falla el refresh, hacer logout
-      await this.logout();
-      throw error;
-    }
+    };
   }
 
-  // Métodos de utilidad públicos
-  public getState(): AuthState {
+  /**
+   * Get current authentication state
+   */
+  getState(): AuthState {
     return { ...this.state };
   }
 
-  public getCurrentUser(): AuthUser | null {
+  /**
+   * Get current authenticated user
+   */
+  getCurrentUser(): AuthUser | null {
     return this.state.user;
   }
 
-  public getAccessToken(): string | null {
+  /**
+   * Get current access token
+   */
+  getAccessToken(): string | null {
     return this.state.tokens?.accessToken || null;
   }
 
-  public isAuthenticated(): boolean {
-    return this.state.isAuthenticated && this.isTokenValid(this.state.tokens?.accessToken);
+  /**
+   * Get current refresh token
+   */
+  getRefreshToken(): string | null {
+    return this.state.tokens?.refreshToken || null;
   }
 
-  public async getValidAccessToken(): Promise<string | null> {
+  /**
+   * Check if user is currently authenticated
+   */
+  async isAuthenticated(): Promise<boolean> {
+    await this.ready;
+    if (!this.state.isAuthenticated || !this.state.tokens?.accessToken) {
+      return false;
+    }
+
+    return this.isTokenValid(this.state.tokens.accessToken);
+  }
+
+  /**
+   * Validate current session with the server using refresh token
+   * This is called automatically when the app regains focus/visibility
+   */
+  async validateSession(): Promise<boolean> {
+    this.logger.debug('Validating session with server...');
+
+    // Si no hay sesión activa, no hay nada que validar
+    if (!this.state.isAuthenticated || !this.state.tokens) {
+      this.logger.debug('No active session to validate');
+      return false;
+    }
+
+    // Si no hay refresh token, no podemos validar con el servidor
+    if (!this.config.tokenRefresh.enabled || !this.state.tokens.refreshToken) {
+      this.logger.debug('Cannot validate session: refresh token not available');
+      // Para tokens sin refresh, asumir válidos hasta que fallen en una petición
+      return true;
+    }
+
+    try {
+      // Intentar refrescar el token como forma de validación
+      // Si el servidor acepta el refresh token, la sesión es válida
+      await this.refreshTokens();
+
+      this.logger.debug('Session validated successfully');
+      this.callbacks.onSessionValidated?.();
+
+      return true;
+
+    } catch (error) {
+      this.logger.warn('Session validation failed:', error);
+
+      // Si falla el refresh, la sesión es inválida
+      if (this.config.sessionValidation.autoLogoutOnInvalid) {
+        this.logger.debug('Auto-logout due to invalid session');
+        await this.clearSession();
+        this.callbacks.onSessionInvalid?.();
+      }
+
+      return false;
+    }
+  }
+
+  /**
+   * Get a valid access token, refreshing if necessary
+   */
+  async getValidAccessToken(): Promise<string | null> {
+    await this.ready;
     if (!this.state.tokens?.accessToken) {
       return null;
     }
 
-    // Si el token está próximo a expirar, refrescarlo
-    if (this.shouldRefreshToken(this.state.tokens.accessToken)) {
+    // If refresh is disabled, return token only if valid
+    if (!this.config.tokenRefresh.enabled) {
+      const isValid = await this.isTokenValid(this.state.tokens.accessToken);
+      return isValid ? this.state.tokens.accessToken : null;
+    }
+
+    // Check if token should be refreshed using async method for better accuracy
+    const shouldRefresh = await this.refreshManager.shouldRefreshTokenAsync(this.state.tokens.accessToken);
+    
+    if (shouldRefresh && await this.refreshManager.canRefresh()) {
       try {
-        const tokens = await this.refreshTokens();
+        const tokens = await this.refreshManager.refreshTokens();
         return tokens.accessToken;
       } catch (error) {
+        this.logger.error('Failed to refresh token:', error);
         return null;
       }
     }
 
-    return this.state.tokens.accessToken;
+    const isValid = await this.isTokenValid(this.state.tokens.accessToken);
+    return isValid ? this.state.tokens.accessToken : null;
   }
 
-  // Métodos para integración con otros clientes HTTP
-  public async getAuthHeaders(): Promise<Record<string, string>> {
+  /**
+   * Get authorization headers for API requests
+   */
+  async getAuthHeaders(): Promise<Record<string, string>> {
     const token = await this.getValidAccessToken();
     if (!token) {
-      throw new Error('No valid authentication token');
+      throw new Error('No valid authentication token available');
     }
 
     return {
@@ -419,141 +458,534 @@ class AuthSDK {
     };
   }
 
-  // Métodos privados de utilidad
-  private isTokenValid(token?: string): boolean {
-    if (!token) return false;
-
-    try {
-      const payload = this.parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      return payload.exp > now;
-    } catch {
-      return false;
+  /**
+   * Debug token information
+   */
+  debugToken(token?: string): void {
+    if (!this.config.debug) return;
+    const targetToken = token || this.state.tokens?.accessToken;
+    if (!targetToken) {
+      console.log('No token to debug');
+      return;
     }
-  }
 
-  private shouldRefreshToken(token: string): boolean {
-    try {
-      const payload = this.parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      return payload.exp - now < this.config.tokenRefresh.bufferTime!;
-    } catch {
-      return false;
+    console.group('🔍 Token Debug Information');
+    const tokenInfo = TokenHandler.parseToken(targetToken);
+    console.log('Token type:', tokenInfo.type);
+    console.log('Token info:', tokenInfo);
+
+    if (tokenInfo.type === 'jwt' && tokenInfo.payload) {
+      console.log('JWT Payload:', tokenInfo.payload);
+      if (tokenInfo.exp) {
+        const expiryDate = new Date(tokenInfo.exp * 1000);
+        const now = new Date();
+        const timeLeft = Math.max(0, Math.floor((expiryDate.getTime() - now.getTime()) / 1000));
+        console.log('Expires at:', expiryDate.toISOString());
+        console.log('Time left:', `${Math.floor(timeLeft / 60)}m ${timeLeft % 60}s`);
+      }
     }
+
+    console.log('Refresh status:', this.refreshManager.getRefreshStatus());
+    console.groupEnd();
   }
 
-  private parseTokenPayload(token: string): any {
-    const base64Payload = token.split('.')[1];
-    const payload = JSON.parse(atob(base64Payload));
-    return payload;
-  }
-
-  private scheduleTokenRefresh(token: string): void {
-    this.clearRefreshTimer();
+  /**
+   * Debug API response structure
+   */
+  debugResponse(response: any): void {
+    if (!this.config.debug) return;
+    console.group('🔍 API Response Debug');
+    TokenExtractor.debugResponse(response);
 
     try {
-      const payload = this.parseTokenPayload(token);
-      const now = Math.floor(Date.now() / 1000);
-      const timeUntilRefresh = (payload.exp - now - this.config.tokenRefresh.bufferTime!) * 1000;
+      const tokens = TokenExtractor.extractTokens(response);
+      console.log('✅ Extracted tokens:', tokens);
+    } catch (error) {
+      console.log('❌ Token extraction failed:', error);
+    }
 
-      if (timeUntilRefresh > 0) {
-        this.refreshTimer = setTimeout(() => {
-          this.refreshTokens().catch(console.error);
-        }, timeUntilRefresh);
+    try {
+      const user = TokenExtractor.extractUser(response);
+      console.log('✅ Extracted user:', user);
+    } catch (error) {
+      console.log('❌ User extraction failed:', error);
+    }
+
+    console.groupEnd();
+  }
+
+  /**
+   * Force refresh tokens regardless of expiration
+   */
+  async forceRefreshTokens(): Promise<AuthTokens> {
+    return this.refreshManager.forceRefresh();
+  }
+
+  /**
+   * Get comprehensive session information
+   */
+  async getExtendedSessionInfo(): Promise<ExtendedSessionInfo> {
+    const tokens = await this.storageManager.getStoredTokens();
+    const metadata = await this.storageManager.getTokenMetadata();
+    const isValid = tokens?.accessToken ? await this.isTokenValid(tokens.accessToken) : false;
+
+    return {
+      isValid,
+      user: this.state.user,
+      tokens: this.state.tokens,
+      tokenType: tokens?.tokenType || null,
+      tokenFormat: this.detectTokenFormat(tokens?.accessToken),
+      expiresIn: tokens?.expiresIn || null,
+      refreshAvailable: await this.refreshManager.canRefresh(),
+      canRefresh: Boolean(this.config.tokenRefresh?.enabled) && await this.refreshManager.canRefresh(),
+      sessionId: metadata?.sessionId || null,
+      backendType: this.state.backendType || null,
+      storedAt: metadata?.storedAt || null,
+      lastRefreshed: metadata?.lastRefreshed || null,
+      originalResponse: this.state.user?._originalUserResponse || null,
+    };
+  }
+
+  /**
+   * Get detailed session information (legacy method)
+   */
+  async getSessionInfo(): Promise<{
+    isValid: boolean;
+    user: AuthUser | null;
+    tokenType: string | null;
+    expiresIn: number | null;
+    refreshAvailable: boolean;
+    sessionId: string | null;
+  }> {
+    const extendedInfo = await this.getExtendedSessionInfo();
+    return {
+      isValid: extendedInfo.isValid,
+      user: extendedInfo.user,
+      tokenType: extendedInfo.tokenType,
+      expiresIn: extendedInfo.expiresIn,
+      refreshAvailable: extendedInfo.refreshAvailable,
+      sessionId: extendedInfo.sessionId,
+    };
+  }
+
+  /**
+   * Test extraction with mock response (debugging)
+   */
+  testExtraction(response: any): void {
+    if (!this.config.debug) return;
+    console.group('🧪 Testing Token and User Extraction');
+    
+    try {
+      console.log('📥 Original response:', response);
+      
+      // Test token extraction
+      console.log('🔑 Testing token extraction...');
+      const tokens = TokenExtractor.extractTokens(response);
+      console.log('✅ Extracted tokens:', tokens);
+      
+      // Test user extraction
+      console.log('👤 Testing user extraction...');
+      const user = TokenExtractor.extractUser(response);
+      console.log('✅ Extracted user:', user);
+      
+      console.log('🎉 Extraction test completed successfully!');
+      
+    } catch (error) {
+      console.error('❌ Extraction test failed:', error);
+    }
+    
+    console.groupEnd();
+  }
+
+  /**
+   * Detect token format
+   */
+  private detectTokenFormat(token?: string): 'jwt' | 'opaque' | 'sanctum' | null {
+    if (!token) return null;
+    
+    if (token.includes('|')) return 'sanctum';
+    if (token.split('.').length === 3) return 'jwt';
+    return 'opaque';
+  }
+
+  /**
+   * Initialize from stored authentication data
+   */
+  private async initializeFromStorage(): Promise<void> {
+    try {
+      // Migrate storage if needed
+      await this.storageManager.migrateStorage();
+
+      const [storedTokens, storedUser] = await Promise.all([
+        this.storageManager.getStoredTokens(),
+        this.storageManager.getStoredUser()
+      ]);
+
+      if (storedTokens?.accessToken && storedUser) {
+        // Validate token before establishing session
+        const isValid = await this.isTokenValid(storedTokens.accessToken);
+
+        if (isValid) {
+          this.state = {
+            isAuthenticated: true,
+            user: storedUser,
+            tokens: storedTokens,
+            loading: false,
+            error: null,
+          };
+
+          // Setup refresh if enabled
+          if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
+            this.refreshManager.scheduleTokenRefresh(storedTokens);
+          }
+
+          // Schedule expiration handling
+          this.scheduleTokenExpiration(storedTokens);
+
+          // Start session validation listeners
+          if (this.sessionValidator) {
+            this.sessionValidator.startListening();
+            this.logger.debug('Session validation listeners started');
+          }
+
+          // Validar sesión al inicio — awaited para que `ready` garantice
+          // que el estado es consistente antes de que el consumidor continúe
+          if (this.config.sessionValidation.validateOnStartup) {
+            this.logger.debug('Performing startup session validation...');
+            try {
+              const isValid = await this.validateSession();
+              if (!isValid) {
+                this.logger.warn('Startup session validation failed');
+                if (!this.config.sessionValidation.autoLogoutOnInvalid) {
+                  await this.clearSession();
+                }
+              } else {
+                this.logger.debug('Startup session validation successful');
+              }
+            } catch (err) {
+              this.logger.error('Error during startup session validation:', err);
+            }
+          }
+
+          // console.debug('Session restored from storage');
+        } else {
+          this.logger.debug('Stored token is invalid, clearing storage');
+          await this.storageManager.clearAll();
+        }
+      } else {
+        this.logger.debug('No valid session found in storage');
+        await this.storageManager.clearAll();
       }
     } catch (error) {
-      console.error('Error scheduling token refresh:', error);
+      this.logger.error('Error initializing from storage:', error);
+      await this.storageManager.clearAll();
+    } finally {
+      this.isInitialized = true;
+      this.notifyStateChange();
     }
   }
 
-  private clearRefreshTimer(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = null;
+  /**
+   * Establish new session with tokens and user
+   */
+  private async establishSession(tokens: AuthTokens, user: AuthUser): Promise<void> {
+    // Store tokens and user
+    await Promise.all([
+      this.storageManager.storeTokens(tokens),
+      this.storageManager.storeUser(user)
+    ]);
+
+    // Update state
+    this.state = {
+      isAuthenticated: true,
+      user,
+      tokens,
+      loading: false,
+      error: null,
+    };
+
+    // Setup refresh scheduling
+    if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
+      this.refreshManager.scheduleTokenRefresh(tokens);
+    }
+
+    // Schedule expiration handling
+    this.scheduleTokenExpiration(tokens);
+
+    // Start session validation listeners
+    if (this.sessionValidator) {
+      this.sessionValidator.startListening();
+      this.logger.debug('Session validation listeners started');
+    }
+
+    this.notifyStateChange();
+  }
+
+  /**
+   * Clear current session completely
+   */
+  private async clearSession(): Promise<void> {
+    // Stop session validation listeners
+    if (this.sessionValidator) {
+      this.sessionValidator.stopListening();
+      this.logger.debug('Session validation listeners stopped');
+    }
+
+    // Clear storage
+    await this.storageManager.clearAll();
+
+    // Clear timers
+    this.clearExpirationTimer();
+    this.refreshManager.clearRefreshTimer();
+    this.refreshManager.reset();
+
+    // Reset state
+    this.state = {
+      isAuthenticated: false,
+      user: null,
+      tokens: null,
+      loading: false,
+      error: null,
+      isRefreshing: false,
+      lastActivity: Date.now(),
+      backendType: 'unknown',
+      capabilities: {
+        canRefresh: Boolean(this.config.tokenRefresh?.enabled),
+        hasProfile: true,
+        supportsOTP: false,
+        supportsBiometric: false
+      }
+    };
+
+    this.notifyStateChange();
+  }
+
+  /**
+   * Handle token refresh completion
+   */
+  private handleTokenRefresh(tokens: AuthTokens): void {
+    this.state.tokens = tokens;
+
+    // Reschedule expiration
+    this.scheduleTokenExpiration(tokens);
+
+    this.notifyStateChange();
+  }
+
+  /**
+   * Schedule automatic token expiration handling
+   */
+  private scheduleTokenExpiration(tokens: AuthTokens): void {
+    this.clearExpirationTimer();
+
+    const expiresInSeconds = ExpirationHandler.calculateExpiration(
+      tokens.accessToken,
+      tokens.expiresIn,
+      tokens.expiresAt
+    );
+
+    if (expiresInSeconds && expiresInSeconds > 0) {
+      this.expirationTimer = setTimeout(() => {
+        this.handleTokenExpiration();
+      }, expiresInSeconds * 1000);
+
+      // console.debug(`Token expiration scheduled in ${expiresInSeconds} seconds`);
     }
   }
 
-  // Métodos de storage
-  private storeTokens(tokens: AuthTokens): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(this.config.storage.tokenKey || '', tokens.accessToken || '');
-      if (tokens.refreshToken) {
-        localStorage.setItem(this.config.storage.refreshTokenKey || '', tokens.refreshToken);
+  /**
+   * Handle automatic token expiration
+   */
+  private async handleTokenExpiration(): Promise<void> {
+    this.logger.debug('Token expired, handling expiration...');
+
+    // Try to refresh if possible
+    if (this.config.tokenRefresh.enabled && await this.refreshManager.canRefresh()) {
+      try {
+        await this.refreshManager.refreshTokens();
+        this.logger.debug('Token refreshed successfully on expiration');
+        return;
+      } catch (error) {
+        this.logger.error('Failed to refresh expired token:', error);
       }
     }
+
+    // If refresh fails or is not available, logout
+    this.logger.debug('Performing automatic logout due to token expiration');
+    await this.logout();
+    this.callbacks.onTokenExpired?.();
   }
 
-  private storeUser(user: AuthUser): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(this.config.storage.userKey || '', JSON.stringify(user));
+  /**
+   * Clear expiration timer
+   */
+  private clearExpirationTimer(): void {
+    if (this.expirationTimer) {
+      clearTimeout(this.expirationTimer);
+      this.expirationTimer = null;
     }
   }
 
-  private getStoredTokens(): AuthTokens | null {
-    if (typeof window !== 'undefined') {
-      const accessToken = localStorage.getItem(this.config.storage.tokenKey || '');
-      const refreshToken = localStorage.getItem(this.config.storage.refreshTokenKey || '');
+  /**
+   * Validate token based on its type
+   */
+  private async isTokenValid(token: string): Promise<boolean> {
+    if (!token) return false;
 
-      if (accessToken) {
-        return {
-          accessToken,
-          refreshToken: refreshToken || undefined,
-        };
+    const tokenInfo = TokenHandler.parseToken(token);
+    
+    switch (tokenInfo.type) {
+      case 'jwt':
+        return tokenInfo.isValid;
+      
+      case 'sanctum':
+      case 'opaque':
+        // For non-JWT tokens, check metadata
+        return this.validateStoredToken(token);
+      
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Validate stored token using metadata
+   */
+  private async validateStoredToken(token: string): Promise<boolean> {
+    try {
+      const metadata = await this.storageManager.getTokenMetadata();
+      const tokens = await this.storageManager.getStoredTokens();
+
+      if (!metadata?.storedAt || !tokens?.expiresIn) {
+        // No expiration info, assume valid for now
+        return true;
       }
+
+      const now = Math.floor(Date.now() / 1000);
+      const timeElapsed = now - metadata.storedAt;
+      return timeElapsed < tokens.expiresIn;
+
+    } catch {
+      return false;
     }
-    return null;
   }
 
-  private getStoredUser(): AuthUser | null {
-    if (typeof window !== 'undefined') {
-      const userData = localStorage.getItem(this.config.storage.userKey || '');
-      if (userData) {
-        try {
-          return JSON.parse(userData);
-        } catch {
-          return null;
-        }
+  /**
+   * Create default HTTP client using fetch
+   */
+  private createDefaultHttpClient(): HttpClient {
+    const makeRequest = async (url: string, options: RequestInit) => {
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        ...options,
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({
+          message: `HTTP ${response.status}: ${response.statusText}`
+        }));
+        throw new Error(error.message || `Request failed with status ${response.status}`);
       }
-    }
-    return null;
+
+      const text = await response.text();
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Expected JSON response but received non-JSON content (status ${response.status})`);
+      }
+    };
+
+    return {
+      async post(url: string, data?: any, config?: any) {
+        return makeRequest(url, {
+          method: 'POST',
+          body: data ? JSON.stringify(data) : undefined,
+          ...config,
+        });
+      },
+
+      async get(url: string, config?: any) {
+        return makeRequest(url, {
+          method: 'GET',
+          ...config,
+        });
+      },
+
+      async put(url: string, data?: any, config?: any) {
+        return makeRequest(url, {
+          method: 'PUT',
+          body: data ? JSON.stringify(data) : undefined,
+          ...config,
+        });
+      },
+
+      async delete(url: string, config?: any) {
+        return makeRequest(url, {
+          method: 'DELETE',
+          ...config,
+        });
+      },
+    };
   }
 
-  private clearStorage(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(this.config.storage.tokenKey || '');
-      localStorage.removeItem(this.config.storage.refreshTokenKey || '');
-      localStorage.removeItem(this.config.storage.userKey || '');
-    }
-  }
-
-  // Métodos de estado
+  /**
+   * Set loading state
+   */
   private setLoading(loading: boolean): void {
     this.state.loading = loading;
     this.notifyStateChange();
   }
 
+  /**
+   * Set error state
+   */
   private setError(error: string | null): void {
     this.state.error = error;
     this.notifyStateChange();
   }
 
-  // MÉTODO ACTUALIZADO: Notificar cambios a todos los listeners
+  /**
+   * Notify all state change listeners
+   */
   private notifyStateChange(): void {
     const currentState = this.getState();
-    
-    // Notificar a los callbacks tradicionales
+
+    // Call traditional callback
     this.callbacks.onAuthStateChanged?.(currentState);
-    
-    // Notificar a todos los listeners suscritos
+
+    // Notify all subscribers
     this.stateChangeListeners.forEach(listener => {
       try {
         listener(currentState);
       } catch (error) {
-        console.error('Error in state change listener:', error);
+        this.logger.error('Error in state change listener:', error);
       }
     });
   }
-}
 
-export { AuthSDK };
-export type { AuthConfig, AuthState, AuthUser, AuthTokens, LoginCredentials, RegisterData };
+  /**
+   * NUEVO: Debug current session with comprehensive info
+   */
+  debugSession(): void {
+    if (!this.config.debug) return;
+    console.group('🔍 Enhanced Session Debug');
+    
+    console.log('📊 Current State:', this.getState());
+    
+    if (this.state.tokens?.accessToken) {
+      this.debugToken(this.state.tokens.accessToken);
+    }
+    
+    if (this.state.user?._originalUserResponse) {
+      console.log('📥 Original User Response:', this.state.user._originalUserResponse);
+    }
+    
+    console.log('🔄 Refresh Status:', this.refreshManager.getRefreshStatus());
+    
+    console.groupEnd();
+  }
+}

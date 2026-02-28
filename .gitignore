@@ -1,11 +1,147 @@
+# ===================================
+# SDK SIMPLE AUTH - .gitignore
+# ===================================
+
+# === Dependencies ===
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# === Build outputs ===
 dist/
-*.log
-.DS_Store
+build/
+out/
+.next/
+.nuxt/
+.vercel/
+
+# === Environment variables ===
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# === IDE/Editor files ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# === Runtime data ===
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# === Coverage directory used by tools like istanbul ===
 coverage/
+*.lcov
 .nyc_output/
+
+# === Temporary folders ===
+tmp/
+temp/
+.tmp/
+
+# === Cache directories ===
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# === TypeScript ===
+*.tsbuildinfo
+.tsbuildinfo
+
+# === Compiled JS inside src/ (source is TypeScript, not JS) ===
+src/**/*.js
+
+# === Testing ===
+.jest/
+jest.config.js.bak
+
+# === Backup files ===
+backup_*/
+*.backup
+*.bak
+
+# === Claude Code / AI development tools ===
+CLAUDE.md
+memory/
+.claude/
+
+# === Local development ===
+.local/
+test_*.js
+test_*.mjs
+quick_test.*
+find_issues.sh
+test_build*.js
+CORRECCIONES_APLICADAS.md
+PROJECT_STRUCTURE.md
+ESTRUCTURE.MD
+IMPLEMENTATION_COMPLETE.md
+README_ENHANCED.md
+# === Package manager ===
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# === OS generated files ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# === Windows ===
+desktop.ini
+
+# === Linux ===
+*~
+
+# === Documentation drafts ===
+docs/drafts/
+*.draft.md
+
+# === Examples that shouldn't be in the package ===
+examples/local-testing/
+examples/private/
+
+# === Migration files ===
+migrate_to_enhanced.sh
+
+ESM_FIX_APPLIED.md
+build_manual.js
+check_status.sh
+fix_build.js
+fix_esm_build.js
+make_executable.sh
+quick_fix.sh
+rebuild.sh
+rebuild_clean.sh
+rebuild_fixed.sh
+test_and_publish.sh
+verify_build.js
+
+AXIOS_INTERCEPTORS.md
+SESSION_VALIDATION.md
+DESARROLLO.md
+commands.md
+/release
