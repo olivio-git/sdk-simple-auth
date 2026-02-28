@@ -20,6 +20,7 @@ export class AxiosInterceptorManager {
   private getAccessToken: () => Promise<string | null>;
   private onSessionInvalid: () => void;
   private onTokenRefresh?: () => Promise<void>;
+  private logger: Logger;
 
   constructor(
     axiosInstance: any,
@@ -27,12 +28,14 @@ export class AxiosInterceptorManager {
       getAccessToken: () => Promise<string | null>;
       onSessionInvalid: () => void;
       onTokenRefresh?: () => Promise<void>;
-    }
+    },
+    logger?: Logger
   ) {
     this.axiosInstance = axiosInstance;
     this.getAccessToken = callbacks.getAccessToken;
     this.onSessionInvalid = callbacks.onSessionInvalid;
     this.onTokenRefresh = callbacks.onTokenRefresh;
+    this.logger = logger ?? new Logger();
   }
 
   /**
@@ -49,7 +52,7 @@ export class AxiosInterceptorManager {
 
     // Verificar que sea una instancia de Axios válida
     if (!this.isAxiosInstance(this.axiosInstance)) {
-      Logger.warn('AxiosInterceptorManager: Invalid Axios instance provided');
+      this.logger.warn('AxiosInterceptorManager: Invalid Axios instance provided');
       return;
     }
 
@@ -64,11 +67,11 @@ export class AxiosInterceptorManager {
               // Solo inyectar si no hay Authorization header ya configurado
               if (!config.headers.Authorization) {
                 config.headers.Authorization = `Bearer ${token}`;
-                Logger.debug('AxiosInterceptor: Token injected automatically');
+                this.logger.debug('AxiosInterceptor: Token injected automatically');
               }
             }
           } catch (error) {
-            Logger.error('AxiosInterceptor: Error getting access token:', error);
+            this.logger.error('AxiosInterceptor: Error getting access token:', error);
           }
 
           return config;
@@ -78,7 +81,7 @@ export class AxiosInterceptorManager {
         }
       );
 
-      Logger.debug('AxiosInterceptor: Request interceptor configured');
+      this.logger.debug('AxiosInterceptor: Request interceptor configured');
     }
 
     // Response interceptor - Manejar errores de autenticación
@@ -100,7 +103,7 @@ export class AxiosInterceptorManager {
 
             if (this.isRefreshing) {
               // Si ya se está refrescando, encolar la petición
-              Logger.debug('AxiosInterceptor: Refresh in progress, queuing request');
+              this.logger.debug('AxiosInterceptor: Refresh in progress, queuing request');
               return new Promise((resolve, reject) => {
                 this.failedQueue.push({ resolve, reject });
               })
@@ -114,7 +117,7 @@ export class AxiosInterceptorManager {
             }
 
             this.isRefreshing = true;
-            Logger.debug('AxiosInterceptor: Authentication error (401), starting refresh...');
+            this.logger.debug('AxiosInterceptor: Authentication error (401), starting refresh...');
 
             try {
               await this.onTokenRefresh();
@@ -124,7 +127,7 @@ export class AxiosInterceptorManager {
                 throw new Error('No token available after refresh');
               }
 
-              Logger.debug('AxiosInterceptor: Token refreshed successfully');
+              this.logger.debug('AxiosInterceptor: Token refreshed successfully');
               
               // Procesar cola con el nuevo token
               this.processQueue(null, newToken);
@@ -134,7 +137,7 @@ export class AxiosInterceptorManager {
               return this.axiosInstance.request(originalRequest);
 
             } catch (refreshError) {
-              Logger.error('AxiosInterceptor: Token refresh failed:', refreshError);
+              this.logger.error('AxiosInterceptor: Token refresh failed:', refreshError);
               this.processQueue(refreshError as Error, null);
               this.handleSessionInvalid(status);
               return Promise.reject(refreshError);
@@ -145,7 +148,7 @@ export class AxiosInterceptorManager {
 
           // Otros errores de autenticación (403, 422) que no requieren refresh
           if (status === 422 || status === 403) {
-             Logger.warn(`AxiosInterceptor: Auth error (${status}), checking session...`);
+             this.logger.warn(`AxiosInterceptor: Auth error (${status}), checking session...`);
              // Opcional: Podríamos validar sesión aquí también
           }
 
@@ -153,17 +156,17 @@ export class AxiosInterceptorManager {
         }
       );
 
-      Logger.debug('AxiosInterceptor: Response interceptor configured');
+      this.logger.debug('AxiosInterceptor: Response interceptor configured');
     }
 
-    Logger.debug('Axios interceptors configured successfully');
+    this.logger.debug('Axios interceptors configured successfully');
   }
 
   /**
    * Procesar cola de peticiones fallidas
    */
   private processQueue(error: Error | null, token: string | null = null): void {
-    Logger.debug(`AxiosInterceptor: Processing queue (${this.failedQueue.length} requests)`);
+    this.logger.debug(`AxiosInterceptor: Processing queue (${this.failedQueue.length} requests)`);
     
     this.failedQueue.forEach((prom) => {
       if (error) {
@@ -180,7 +183,7 @@ export class AxiosInterceptorManager {
    * Manejar sesión inválida
    */
   private handleSessionInvalid(status: number): void {
-    Logger.warn(`AxiosInterceptor: Session invalid (HTTP ${status}), triggering logout`);
+    this.logger.warn(`AxiosInterceptor: Session invalid (HTTP ${status}), triggering logout`);
 
     // Llamar callback de sesión inválida
     this.onSessionInvalid();
@@ -197,16 +200,16 @@ export class AxiosInterceptorManager {
     if (this.requestInterceptorId !== null) {
       this.axiosInstance.interceptors.request.eject(this.requestInterceptorId);
       this.requestInterceptorId = null;
-      Logger.debug('AxiosInterceptor: Request interceptor removed');
+      this.logger.debug('AxiosInterceptor: Request interceptor removed');
     }
 
     if (this.responseInterceptorId !== null) {
       this.axiosInstance.interceptors.response.eject(this.responseInterceptorId);
       this.responseInterceptorId = null;
-      Logger.debug('AxiosInterceptor: Response interceptor removed');
+      this.logger.debug('AxiosInterceptor: Response interceptor removed');
     }
 
-    Logger.debug('Axios interceptors removed');
+    this.logger.debug('Axios interceptors removed');
   }
 
   /**

@@ -30,16 +30,16 @@ export class AuthSDK {
   private stateChangeListeners: StateChangeListener[] = [];
   private isInitialized = false;
   public readonly ready: Promise<void>;
+  private logger: Logger;
 
   constructor(config: AuthConfig, callbacks?: AuthCallbacks) {
     this.config = this.buildConfig(config);
     this.callbacks = callbacks || {};
 
-    // Initialize managers
-    // Initialize Logger
-    Logger.setDebugMode(this.config.debug || false);
+    // Create per-instance logger
+    this.logger = new Logger(this.config.debug || false);
 
-    this.storageManager = new StorageManager(this.config.storage);
+    this.storageManager = new StorageManager(this.config.storage, this.logger);
     this.refreshManager = new RefreshManager(
       this.config,
       this.storageManager,
@@ -54,7 +54,8 @@ export class AuthSDK {
         onSessionRenewed: (tokens) => {
           this.callbacks.onTokenRefresh?.(tokens);
         }
-      }
+      },
+      this.logger
     );
 
     // Initial state
@@ -77,7 +78,8 @@ export class AuthSDK {
     if (this.config.sessionValidation.enabled && SessionValidator.isSupported()) {
       this.sessionValidator = new SessionValidator(
         this.config.sessionValidation,
-        () => this.validateSession()
+        () => this.validateSession(),
+        this.logger
       );
     }
 
@@ -88,14 +90,15 @@ export class AuthSDK {
         {
           getAccessToken: () => this.getValidAccessToken(),
           onSessionInvalid: async () => {
-            Logger.warn('Axios interceptor detected invalid session');
+            this.logger.warn('Axios interceptor detected invalid session');
             await this.clearSession();
             this.callbacks.onSessionInvalid?.();
           },
           onTokenRefresh: async () => {
             await this.refreshTokens();
           }
-        }
+        },
+        this.logger
       );
 
       // Configurar interceptores
@@ -104,7 +107,7 @@ export class AuthSDK {
         handleAuthErrors: this.config.interceptors.handleAuthErrors
       });
 
-      Logger.debug('Axios interceptors initialized');
+      this.logger.debug('Axios interceptors initialized');
     }
 
     // Initialize from storage
@@ -191,7 +194,7 @@ export class AuthSDK {
       await this.establishSession(tokens, user);
 
       this.callbacks.onLogin?.(user, tokens);
-      Logger.debug('Login successful, session established');
+      this.logger.debug('Login successful, session established');
 
       return user;
 
@@ -229,13 +232,13 @@ export class AuthSDK {
         await this.establishSession(tokens, user);
 
         this.callbacks.onLogin?.(user, tokens);
-        Logger.debug('Registration successful with automatic login');
+        this.logger.debug('Registration successful with automatic login');
 
         return user;
 
       } catch (tokenError) {
         // If no tokens, registration was successful but requires separate login
-        Logger.debug('Registration successful, manual login required');
+        this.logger.debug('Registration successful, manual login required');
         
         const user = TokenExtractor.extractUser(response);
         
@@ -275,15 +278,15 @@ export class AuthSDK {
               Authorization: `Bearer ${this.state.tokens.accessToken}`,
             },
           });
-          Logger.debug('Server-side logout successful');
+          this.logger.debug('Server-side logout successful');
         } catch (error) {
-          Logger.warn('Server-side logout failed, continuing with client-side cleanup:', error);
+          this.logger.warn('Server-side logout failed, continuing with client-side cleanup:', error);
         }
       }
     } finally {
       await this.clearSession();
       this.callbacks.onLogout?.();
-      Logger.debug('Logout completed, session cleared');
+      this.logger.debug('Logout completed, session cleared');
     }
   }
 
@@ -292,10 +295,10 @@ export class AuthSDK {
    * Useful when the server has already invalidated the session (401/422)
    */
   async clearLocalSession(): Promise<void> {
-    Logger.debug('Clearing local session only (no backend call)');
+    this.logger.debug('Clearing local session only (no backend call)');
     await this.clearSession();
     this.callbacks.onLogout?.();
-    Logger.debug('Local session cleared');
+    this.logger.debug('Local session cleared');
   }
 
   /**
@@ -370,17 +373,17 @@ export class AuthSDK {
    * This is called automatically when the app regains focus/visibility
    */
   async validateSession(): Promise<boolean> {
-    Logger.debug('Validating session with server...');
+    this.logger.debug('Validating session with server...');
 
     // Si no hay sesión activa, no hay nada que validar
     if (!this.state.isAuthenticated || !this.state.tokens) {
-      Logger.debug('No active session to validate');
+      this.logger.debug('No active session to validate');
       return false;
     }
 
     // Si no hay refresh token, no podemos validar con el servidor
     if (!this.config.tokenRefresh.enabled || !this.state.tokens.refreshToken) {
-      Logger.debug('Cannot validate session: refresh token not available');
+      this.logger.debug('Cannot validate session: refresh token not available');
       // Para tokens sin refresh, asumir válidos hasta que fallen en una petición
       return true;
     }
@@ -390,17 +393,17 @@ export class AuthSDK {
       // Si el servidor acepta el refresh token, la sesión es válida
       await this.refreshTokens();
 
-      Logger.debug('Session validated successfully');
+      this.logger.debug('Session validated successfully');
       this.callbacks.onSessionValidated?.();
 
       return true;
 
     } catch (error) {
-      Logger.warn('Session validation failed:', error);
+      this.logger.warn('Session validation failed:', error);
 
       // Si falla el refresh, la sesión es inválida
       if (this.config.sessionValidation.autoLogoutOnInvalid) {
-        Logger.debug('Auto-logout due to invalid session');
+        this.logger.debug('Auto-logout due to invalid session');
         await this.clearSession();
         this.callbacks.onSessionInvalid?.();
       }
@@ -432,7 +435,7 @@ export class AuthSDK {
         const tokens = await this.refreshManager.refreshTokens();
         return tokens.accessToken;
       } catch (error) {
-        Logger.error('Failed to refresh token:', error);
+        this.logger.error('Failed to refresh token:', error);
         return null;
       }
     }
@@ -639,41 +642,41 @@ export class AuthSDK {
           // Start session validation listeners
           if (this.sessionValidator) {
             this.sessionValidator.startListening();
-            Logger.debug('Session validation listeners started');
+            this.logger.debug('Session validation listeners started');
           }
 
           // NUEVO: Validar sesión al inicio si está habilitado
           if (this.config.sessionValidation.validateOnStartup) {
-            Logger.debug('Performing startup session validation...');
+            this.logger.debug('Performing startup session validation...');
             // No esperamos a que termine para no bloquear la UI inicial, pero
             // si falla, cerrará la sesión
             this.validateSession().then(isValid => {
               if (!isValid) {
-                Logger.warn('Startup session validation failed, logging out');
+                this.logger.warn('Startup session validation failed, logging out');
                 // El logout ya se maneja dentro de validateSession si autoLogoutOnInvalid es true
                 // pero por seguridad forzamos si no lo es
                 if (!this.config.sessionValidation.autoLogoutOnInvalid) {
                    this.clearSession();
                 }
               } else {
-                Logger.debug('Startup session validation successful');
+                this.logger.debug('Startup session validation successful');
               }
             }).catch(err => {
-              Logger.error('Error during startup session validation:', err);
+              this.logger.error('Error during startup session validation:', err);
             });
           }
 
           // console.debug('Session restored from storage');
         } else {
-          Logger.debug('Stored token is invalid, clearing storage');
+          this.logger.debug('Stored token is invalid, clearing storage');
           await this.storageManager.clearAll();
         }
       } else {
-        Logger.debug('No valid session found in storage');
+        this.logger.debug('No valid session found in storage');
         await this.storageManager.clearAll();
       }
     } catch (error) {
-      Logger.error('Error initializing from storage:', error);
+      this.logger.error('Error initializing from storage:', error);
       await this.storageManager.clearAll();
     } finally {
       this.isInitialized = true;
@@ -711,7 +714,7 @@ export class AuthSDK {
     // Start session validation listeners
     if (this.sessionValidator) {
       this.sessionValidator.startListening();
-      Logger.debug('Session validation listeners started');
+      this.logger.debug('Session validation listeners started');
     }
 
     this.notifyStateChange();
@@ -724,7 +727,7 @@ export class AuthSDK {
     // Stop session validation listeners
     if (this.sessionValidator) {
       this.sessionValidator.stopListening();
-      Logger.debug('Session validation listeners stopped');
+      this.logger.debug('Session validation listeners stopped');
     }
 
     // Clear storage
@@ -793,21 +796,21 @@ export class AuthSDK {
    * Handle automatic token expiration
    */
   private async handleTokenExpiration(): Promise<void> {
-    Logger.debug('Token expired, handling expiration...');
+    this.logger.debug('Token expired, handling expiration...');
 
     // Try to refresh if possible
     if (this.config.tokenRefresh.enabled && await this.refreshManager.canRefresh()) {
       try {
         await this.refreshManager.refreshTokens();
-        Logger.debug('Token refreshed successfully on expiration');
+        this.logger.debug('Token refreshed successfully on expiration');
         return;
       } catch (error) {
-        Logger.error('Failed to refresh expired token:', error);
+        this.logger.error('Failed to refresh expired token:', error);
       }
     }
 
     // If refresh fails or is not available, logout
-    Logger.debug('Performing automatic logout due to token expiration');
+    this.logger.debug('Performing automatic logout due to token expiration');
     await this.logout();
     this.callbacks.onTokenExpired?.();
   }
@@ -952,7 +955,7 @@ export class AuthSDK {
       try {
         listener(currentState);
       } catch (error) {
-        Logger.error('Error in state change listener:', error);
+        this.logger.error('Error in state change listener:', error);
       }
     });
   }

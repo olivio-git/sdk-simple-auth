@@ -11,9 +11,11 @@ import { version as SDK_VERSION } from '../../package.json';
 export class StorageManager {
   private storageAdapter: StorageAdapter;
   private config: Required<AuthConfig>['storage'];
+  private logger: Logger;
 
-  constructor(config: Required<AuthConfig>['storage']) {
+  constructor(config: Required<AuthConfig>['storage'], logger?: Logger) {
     this.config = config;
+    this.logger = logger ?? new Logger();
     this.storageAdapter = this.createStorageAdapter();
   }
 
@@ -58,9 +60,9 @@ export class StorageManager {
         );
       }
 
-      Logger.debug('Tokens stored successfully with session metadata');
+      this.logger.debug('Tokens stored successfully with session metadata');
     } catch (error) {
-      Logger.error('Error storing tokens:', error);
+      this.logger.error('Error storing tokens:', error);
       throw new Error('Failed to store authentication tokens');
     }
   }
@@ -81,9 +83,9 @@ export class StorageManager {
         JSON.stringify(userData)
       );
 
-      Logger.debug('User data stored successfully');
+      this.logger.debug('User data stored successfully');
     } catch (error) {
-      Logger.error('Error storing user:', error);
+      this.logger.error('Error storing user:', error);
       throw new Error('Failed to store user information');
     }
   }
@@ -104,7 +106,7 @@ export class StorageManager {
         tokenData = JSON.parse(tokenDataStr);
       } catch {
         // Handle legacy string-only tokens
-        Logger.warn('Legacy token format detected, migrating...');
+        this.logger.warn('Legacy token format detected, migrating...');
         const refreshToken = await this.storageAdapter.getItem(this.config.refreshTokenKey!);
         return {
           accessToken: tokenDataStr,
@@ -114,7 +116,7 @@ export class StorageManager {
 
       // Validate token data structure
       if (!tokenData.accessToken) {
-        Logger.warn('Invalid token data structure, clearing storage');
+        this.logger.warn('Invalid token data structure, clearing storage');
         await this.clearTokens();
         return null;
       }
@@ -140,7 +142,7 @@ export class StorageManager {
       };
 
     } catch (error) {
-      Logger.error('Error retrieving stored tokens:', error);
+      this.logger.error('Error retrieving stored tokens:', error);
       await this.clearTokens(); // Clean up corrupted data
       return null;
     }
@@ -162,20 +164,20 @@ export class StorageManager {
         
         // Validate basic user structure
         if (!user.id && !user.email) {
-          Logger.warn('Invalid user data structure, clearing storage');
+          this.logger.warn('Invalid user data structure, clearing storage');
           await this.clearUser();
           return null;
         }
 
         return user;
       } catch {
-        Logger.warn('Corrupted user data, clearing storage');
+        this.logger.warn('Corrupted user data, clearing storage');
         await this.clearUser();
         return null;
       }
 
     } catch (error) {
-      Logger.error('Error retrieving stored user:', error);
+      this.logger.error('Error retrieving stored user:', error);
       return null;
     }
   }
@@ -206,7 +208,7 @@ export class StorageManager {
       };
 
     } catch (error) {
-      Logger.error('Error getting token metadata:', error);
+      this.logger.error('Error getting token metadata:', error);
       return null;
     }
   }
@@ -228,7 +230,7 @@ export class StorageManager {
         );
       }
     } catch (error) {
-      Logger.error('Error updating last refresh time:', error);
+      this.logger.error('Error updating last refresh time:', error);
     }
   }
 
@@ -241,9 +243,9 @@ export class StorageManager {
         this.storageAdapter.removeItem(this.config.tokenKey!),
         this.storageAdapter.removeItem(this.config.refreshTokenKey!)
       ]);
-      Logger.debug('Tokens cleared successfully');
+      this.logger.debug('Tokens cleared successfully');
     } catch (error) {
-      Logger.error('Error clearing tokens:', error);
+      this.logger.error('Error clearing tokens:', error);
     }
   }
 
@@ -253,9 +255,9 @@ export class StorageManager {
   async clearUser(): Promise<void> {
     try {
       await this.storageAdapter.removeItem(this.config.userKey!);
-      Logger.debug('User data cleared successfully');
+      this.logger.debug('User data cleared successfully');
     } catch (error) {
-      Logger.error('Error clearing user data:', error);
+      this.logger.error('Error clearing user data:', error);
     }
   }
 
@@ -268,9 +270,9 @@ export class StorageManager {
         this.clearTokens(),
         this.clearUser()
       ]);
-      Logger.debug('All authentication data cleared successfully');
+      this.logger.debug('All authentication data cleared successfully');
     } catch (error) {
-      Logger.error('Error clearing all storage:', error);
+      this.logger.error('Error clearing all storage:', error);
     }
   }
 
@@ -316,7 +318,7 @@ export class StorageManager {
       
       // If no version info, this is legacy storage
       if (!metadata?.version) {
-        Logger.debug('Migrating legacy storage format...');
+        this.logger.debug('Migrating legacy storage format...');
         
         const tokens = await this.getStoredTokens();
         const user = await this.getStoredUser();
@@ -325,11 +327,11 @@ export class StorageManager {
           // Re-store with new format
           await this.storeTokens(tokens);
           await this.storeUser(user);
-          Logger.debug('Storage migration completed successfully');
+          this.logger.debug('Storage migration completed successfully');
         }
       }
     } catch (error) {
-      Logger.error('Error during storage migration:', error);
+      this.logger.error('Error during storage migration:', error);
     }
   }
 

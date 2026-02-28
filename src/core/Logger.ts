@@ -1,47 +1,60 @@
 /**
- * Logger utility for the SDK
- * Allows enabling/disabling debug logs globally
+ * Logger utility for the SDK.
+ * Can be used as an instance (injected per-manager) or via static
+ * convenience methods that delegate to the global default instance.
  */
 export class Logger {
-  private static debugMode = false;
-  private static prefix = '[AuthSDK]';
+  private debugMode: boolean;
+  private readonly prefix: string;
 
-  /**
-   * Enable or disable debug mode
-   */
-  static setDebugMode(enabled: boolean) {
-    this.debugMode = enabled;
+  // Global default instance — used by static convenience methods and utility classes
+  private static defaultInstance = new Logger(false);
+
+  constructor(debug = false, prefix = '[AuthSDK]') {
+    this.debugMode = debug;
+    this.prefix = prefix;
   }
 
-  /**
-   * Log a debug message (only if debug mode is enabled)
-   */
-  static debug(message: string, ...args: any[]) {
+  debug(message: string, ...args: any[]) {
     if (this.debugMode) {
       console.debug(`${this.prefix} [Debug] ${message}`, ...args);
     }
   }
 
-  /**
-   * Log an info message (only if debug mode is enabled)
-   */
-  static log(message: string, ...args: any[]) {
+  log(message: string, ...args: any[]) {
     if (this.debugMode) {
       console.log(`${this.prefix} ${message}`, ...args);
     }
   }
 
-  /**
-   * Log a warning message (always visible, but formatted)
-   */
-  static warn(message: string, ...args: any[]) {
+  warn(message: string, ...args: any[]) {
     console.warn(`${this.prefix} [Warn] ${message}`, ...args);
   }
 
-  /**
-   * Log an error message (always visible, but formatted)
-   */
-  static error(message: string, ...args: any[]) {
+  error(message: string, ...args: any[]) {
     console.error(`${this.prefix} [Error] ${message}`, ...args);
+  }
+
+  // Static convenience methods — delegate to the global default instance.
+  // Used by utility classes (TokenHandler, ExpirationHandler, etc.) that
+  // don't participate in constructor injection.
+  static setDebugMode(enabled: boolean) {
+    Logger.defaultInstance.debugMode = enabled;
+  }
+
+  static debug(message: string, ...args: any[]) {
+    Logger.defaultInstance.debug(message, ...args);
+  }
+
+  static log(message: string, ...args: any[]) {
+    Logger.defaultInstance.log(message, ...args);
+  }
+
+  static warn(message: string, ...args: any[]) {
+    Logger.defaultInstance.warn(message, ...args);
+  }
+
+  static error(message: string, ...args: any[]) {
+    Logger.defaultInstance.error(message, ...args);
   }
 }
