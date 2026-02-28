@@ -1,6 +1,7 @@
 import { IndexedDBAdapter } from '../storage/IndexedDBAdapter';
 import { LocalStorageAdapter } from '../storage/LocalStorageAdapter';
 import { StorageAdapter } from '../storage/StorageAdapter';
+import { EncryptedStorageAdapter } from '../storage/EncryptedStorageAdapter';
 import { AuthConfig, AuthTokens, AuthUser } from '../types';
 import { Logger } from './Logger';
 import { version as SDK_VERSION } from '../../package.json';
@@ -22,15 +23,22 @@ export class StorageManager {
   private createStorageAdapter(): StorageAdapter {
     const storageType = this.config.type || 'indexedDB';
 
+    let adapter: StorageAdapter;
     if (storageType === 'localStorage') {
-      return new LocalStorageAdapter();
+      adapter = new LocalStorageAdapter();
     } else {
-      return new IndexedDBAdapter(
+      adapter = new IndexedDBAdapter(
         this.config.dbName,
         this.config.dbVersion,
         this.config.storeName
       );
     }
+
+    if (this.config.encryption?.enabled) {
+      return new EncryptedStorageAdapter(adapter, this.config.encryption.secret);
+    }
+
+    return adapter;
   }
 
   /**

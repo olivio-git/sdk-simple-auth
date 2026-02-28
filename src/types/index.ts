@@ -15,6 +15,10 @@ export interface AuthConfig {
     tokenKey?: string;
     refreshTokenKey?: string;
     userKey?: string;
+    encryption?: {
+      enabled: boolean;
+      secret?: string;
+    };
   };
   tokenRefresh?: {
     enabled?: boolean;

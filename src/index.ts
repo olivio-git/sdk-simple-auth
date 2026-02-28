@@ -8,6 +8,7 @@ export { AuthSDK } from './core/AuthSDK';
 export { useAuth } from './hooks/useAuth';
 export { LocalStorageAdapter } from './storage/LocalStorageAdapter';
 export { IndexedDBAdapter } from './storage/IndexedDBAdapter';
+export { EncryptedStorageAdapter } from './storage/EncryptedStorageAdapter';
 export { TokenExtractor } from './core/TokenManager';
 export { StorageManager } from './core/StorageManager';
 export { RefreshManager } from './core/RefreshManager';
