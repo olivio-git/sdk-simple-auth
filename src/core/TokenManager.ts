@@ -37,9 +37,10 @@ export class TokenExtractor {
     ''                    // Raíz del objeto
   ];
 
-  // Cache mejorado con TTL
+  // Cache con TTL y límite de tamaño para evitar memory leaks en apps de larga duración
   private static searchCache = new Map<string, { value: any; timestamp: number }>();
   private static readonly CACHE_TTL = 5000;
+  private static readonly MAX_CACHE_SIZE = 50;
 
   /**
    * Búsqueda profunda optimizada con paths específicos
@@ -47,12 +48,25 @@ export class TokenExtractor {
   private static deepSearchByPaths(obj: any, searchPaths: string[]): any {
     if (!obj || typeof obj !== 'object') return null;
 
-    // Generar cache key único
     const cacheKey = `paths_${JSON.stringify(searchPaths)}_${this.generateObjectSignature(obj)}`;
     const cached = this.searchCache.get(cacheKey);
-    
+
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
       return cached.value;
+    }
+
+    // Evict stale and overflow entries before writing
+    if (this.searchCache.size >= this.MAX_CACHE_SIZE) {
+      const now = Date.now();
+      for (const [k, v] of this.searchCache) {
+        if (now - v.timestamp >= this.CACHE_TTL) {
+          this.searchCache.delete(k);
+        }
+      }
+      // If still at limit after TTL eviction, remove oldest entry
+      if (this.searchCache.size >= this.MAX_CACHE_SIZE) {
+        this.searchCache.delete(this.searchCache.keys().next().value!);
+      }
     }
 
     for (const path of searchPaths) {
@@ -204,26 +218,25 @@ export class TokenExtractor {
   /**
    * Extracción mejorada de tokens con soporte para múltiples formatos
    */
-  static extractTokens(response: any): AuthTokens & { _originalTokenResponse?: any } {
-    const accessToken = this.enhancedDeepSearch(response, this.TOKEN_KEYS);
-    const refreshToken = this.enhancedDeepSearch(response, this.REFRESH_TOKEN_KEYS);
-    const tokenType = this.enhancedDeepSearch(response, this.TOKEN_TYPE_KEYS);
+  static extractTokens(response: unknown): AuthTokens & { _originalTokenResponse?: unknown } {
+    const accessToken = this.enhancedDeepSearch(response as Record<string, unknown>, this.TOKEN_KEYS);
+    const refreshToken = this.enhancedDeepSearch(response as Record<string, unknown>, this.REFRESH_TOKEN_KEYS);
+    const tokenType = this.enhancedDeepSearch(response as Record<string, unknown>, this.TOKEN_TYPE_KEYS);
 
     if (!accessToken) {
       throw new Error('No access token found in response');
     }
 
     // Extraer múltiples formatos de expiración
-    const expiresIn = this.extractExpirationTime(response);
-    const expiresAt = this.enhancedDeepSearch(response, ['expires_at', 'expiresAt', 'rt_expires_at']);
+    const expiresIn = this.extractExpirationTime(response as Record<string, unknown>);
+    const expiresAt = this.enhancedDeepSearch(response as Record<string, unknown>, ['expires_at', 'expiresAt', 'rt_expires_at']);
 
-    const tokens: AuthTokens & { _originalTokenResponse?: any } = {
+    const tokens: AuthTokens & { _originalTokenResponse?: unknown } = {
       accessToken,
       refreshToken,
       expiresIn,
       expiresAt,
       tokenType: tokenType || 'Bearer',
-      // NUEVO: Preservar respuesta original para debugging
       _originalTokenResponse: response
     };
 
@@ -241,13 +254,12 @@ export class TokenExtractor {
   /**
    * Extracción flexible de usuario con preservación completa de datos
    */
-  static extractUser(response: any): (AuthUser & { _originalUserResponse?: any; _backendType?: string }) | null {
-    // Buscar datos de usuario usando paths específicos
-    const userData = this.deepSearchByPaths(response, this.USER_SEARCH_PATHS);
+  static extractUser(response: unknown): (AuthUser & { _originalUserResponse?: unknown; _backendType?: string }) | null {
+    const userData = this.deepSearchByPaths(response as Record<string, unknown>, this.USER_SEARCH_PATHS);
 
     if (!userData || typeof userData !== 'object') {
       // Fallback: intentar construir desde campos dispersos
-      return this.buildUserFromScatteredFields(response);
+      return this.buildUserFromScatteredFields(response as Record<string, unknown>);
     }
 
     // Detectar tipo de backend basado en estructura
@@ -256,8 +268,7 @@ export class TokenExtractor {
     // Extraer campos estándar con mapeo flexible
     const standardUser = this.mapToStandardUser(userData);
 
-    // CLAVE: Preservar TODOS los datos originales
-    const enhancedUser: AuthUser & { _originalUserResponse?: any; _backendType?: string } = {
+    const enhancedUser: AuthUser & { _originalUserResponse?: unknown; _backendType?: string } = {
       ...standardUser,
       // Preservar campos originales que no están en el mapping
       ...this.preserveUnmappedFields(userData, standardUser),
@@ -370,7 +381,7 @@ export class TokenExtractor {
   /**
    * Construye usuario desde campos dispersos cuando no hay estructura clara
    */
-  private static buildUserFromScatteredFields(response: any): (AuthUser & { _originalUserResponse?: any; _backendType?: string }) | null {
+  private static buildUserFromScatteredFields(response: Record<string, unknown>): (AuthUser & { _originalUserResponse?: unknown; _backendType?: string }) | null {
     const id = this.enhancedDeepSearch(response, ['id', '_id', 'user_id', 'userId']);
     const email = this.enhancedDeepSearch(response, ['email', 'user_email', 'userEmail']);
     const name = this.enhancedDeepSearch(response, ['name', 'username', 'user_name', 'fullName']);

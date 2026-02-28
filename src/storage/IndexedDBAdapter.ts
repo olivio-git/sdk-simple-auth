@@ -1,5 +1,4 @@
 import { StorageAdapter } from "./StorageAdapter";
-import { Logger } from '../core/Logger';
 
 export class IndexedDBAdapter implements StorageAdapter {
   private dbName: string;
@@ -54,23 +53,18 @@ export class IndexedDBAdapter implements StorageAdapter {
   }
 
   async getItem(key: string): Promise<string | null> {
-    try {
-      const db = await this.openDB();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([this.storeName], 'readonly');
-        const store = transaction.objectStore(this.storeName);
-        const request = store.get(key);
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([this.storeName], 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.get(key);
 
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const result = request.result;
-          resolve(result ? result.value : null);
-        };
-      });
-    } catch (error) {
-      Logger.error('Error getting item from IndexedDB:', error);
-      return null;
-    }
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        resolve(result ? result.value : null);
+      };
+    });
   }
 
   async removeItem(key: string): Promise<void> {

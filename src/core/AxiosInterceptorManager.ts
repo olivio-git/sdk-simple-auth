@@ -1,11 +1,21 @@
 import { Logger } from './Logger';
 
+// Minimal structural interface for Axios — avoids a hard dependency on the axios package
+// while still providing type safety for the parts we actually use.
+interface AxiosLike {
+  interceptors: {
+    request: { use(fn: (config: any) => any, errFn?: (err: any) => any): number; eject(id: number): void };
+    response: { use(fn: (res: any) => any, errFn: (err: any) => any): number; eject(id: number): void };
+  };
+  request(config: any): Promise<any>;
+}
+
 /**
  * AxiosInterceptorManager - Gestiona interceptores de Axios para inyección automática
  * de tokens y manejo de errores de autenticación
  */
 export class AxiosInterceptorManager {
-  private axiosInstance: any;
+  private axiosInstance: AxiosLike;
   private requestInterceptorId: number | null = null;
   private responseInterceptorId: number | null = null;
 
@@ -23,7 +33,7 @@ export class AxiosInterceptorManager {
   private logger: Logger;
 
   constructor(
-    axiosInstance: any,
+    axiosInstance: AxiosLike,
     callbacks: {
       getAccessToken: () => Promise<string | null>;
       onSessionInvalid: () => void | Promise<void>;

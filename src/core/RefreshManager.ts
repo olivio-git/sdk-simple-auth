@@ -68,7 +68,7 @@ export class RefreshManager {
       // Use default scheduling based on token type
       const tokenInfo = TokenHandler.parseToken(tokens.accessToken);
       const defaultExpiration = tokenInfo.type === 'sanctum' ? 24 * 60 * 60 : 60 * 60;
-      const bufferMs = this.config.tokenRefresh.bufferTime! * 1000;
+      const bufferMs = this.config.tokenRefresh.bufferTime ?? 900 * 1000;
       const timeUntilRefresh = (defaultExpiration * 1000) - bufferMs;
 
       if (timeUntilRefresh > 0) {
@@ -89,7 +89,7 @@ export class RefreshManager {
       return;
     }
 
-    const bufferMs = this.config.tokenRefresh.bufferTime! * 1000;
+    const bufferMs = this.config.tokenRefresh.bufferTime ?? 900 * 1000;
     const expiresMs = expiresInSeconds * 1000;
     const timeUntilRefresh = expiresMs - bufferMs;
 
@@ -132,7 +132,7 @@ export class RefreshManager {
     }
 
     // Check retry limit
-    if (this.refreshAttempts >= this.config.tokenRefresh.maxRetries!) {
+    if (this.refreshAttempts >= (this.config.tokenRefresh.maxRetries ?? 3)) {
       this.logger.error('Maximum refresh attempts exceeded, stopping automatic refresh');
       this.refreshAttempts = 0;
       throw new Error('Maximum refresh attempts exceeded');
@@ -151,9 +151,9 @@ export class RefreshManager {
       this.logger.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
 
       // NUEVO: Only schedule retry if we haven't exceeded max retries
-      if (this.refreshAttempts < this.config.tokenRefresh.maxRetries!) {
+      if (this.refreshAttempts < (this.config.tokenRefresh.maxRetries ?? 3)) {
         const retryDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
-        this.logger.debug(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries!} in ${retryDelay}ms`);
+        this.logger.debug(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries ?? 3} in ${retryDelay}ms`);
 
         setTimeout(() => {
           // Only retry if we still have a refresh token
@@ -192,7 +192,7 @@ export class RefreshManager {
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
       const now = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = tokenInfo.exp - now;
-      return timeUntilExpiry < this.config.tokenRefresh.bufferTime!;
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
     }
 
     // For non-JWT tokens, we can't determine synchronously without stored metadata
@@ -213,7 +213,7 @@ export class RefreshManager {
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
       const now = Math.floor(Date.now() / 1000);
       const timeUntilExpiry = tokenInfo.exp - now;
-      return timeUntilExpiry < this.config.tokenRefresh.bufferTime!;
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
     }
 
     // For non-JWT tokens, check stored metadata
@@ -357,7 +357,7 @@ export class RefreshManager {
         this.logger.warn('Refresh token invalid or expired, clearing authentication data');
         await this.storageManager.clearAll();
         // Reset refresh attempts to stop retry loops
-        this.refreshAttempts = this.config.tokenRefresh.maxRetries!;
+        this.refreshAttempts = this.config.tokenRefresh.maxRetries ?? 3;
       }
 
       this.onRefreshError?.(error instanceof Error ? error : new Error(errorMessage));
@@ -419,7 +419,7 @@ export class RefreshManager {
       const timeElapsed = now - metadata.storedAt;
       const timeUntilExpiry = storedTokens.expiresIn - timeElapsed;
 
-      return timeUntilExpiry < this.config.tokenRefresh.bufferTime!;
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
 
     } catch (error) {
       this.logger.error('Error checking refresh metadata:', error);
