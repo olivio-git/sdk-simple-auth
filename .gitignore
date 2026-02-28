@@ -79,6 +79,11 @@ backup_*/
 *.backup
 *.bak
 
+# === Claude Code / AI development tools ===
+CLAUDE.md
+memory/
+.claude/
+
 # === Local development ===
 .local/
 test_*.js

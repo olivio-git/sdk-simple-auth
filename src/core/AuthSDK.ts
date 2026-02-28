@@ -29,6 +29,7 @@ export class AuthSDK {
   private expirationTimer: NodeJS.Timeout | null = null;
   private stateChangeListeners: StateChangeListener[] = [];
   private isInitialized = false;
+  public readonly ready: Promise<void>;
 
   constructor(config: AuthConfig, callbacks?: AuthCallbacks) {
     this.config = this.buildConfig(config);
@@ -107,7 +108,7 @@ export class AuthSDK {
     }
 
     // Initialize from storage
-    this.initializeFromStorage();
+    this.ready = this.initializeFromStorage();
   }
 
   /**
@@ -356,6 +357,7 @@ export class AuthSDK {
    * Check if user is currently authenticated
    */
   async isAuthenticated(): Promise<boolean> {
+    await this.ready;
     if (!this.state.isAuthenticated || !this.state.tokens?.accessToken) {
       return false;
     }
@@ -411,6 +413,7 @@ export class AuthSDK {
    * Get a valid access token, refreshing if necessary
    */
   async getValidAccessToken(): Promise<string | null> {
+    await this.ready;
     if (!this.state.tokens?.accessToken) {
       return null;
     }
