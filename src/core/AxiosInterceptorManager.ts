@@ -18,7 +18,7 @@ export class AxiosInterceptorManager {
 
   // Callbacks
   private getAccessToken: () => Promise<string | null>;
-  private onSessionInvalid: () => void;
+  private onSessionInvalid: () => void | Promise<void>;
   private onTokenRefresh?: () => Promise<void>;
   private logger: Logger;
 
@@ -26,7 +26,7 @@ export class AxiosInterceptorManager {
     axiosInstance: any,
     callbacks: {
       getAccessToken: () => Promise<string | null>;
-      onSessionInvalid: () => void;
+      onSessionInvalid: () => void | Promise<void>;
       onTokenRefresh?: () => Promise<void>;
     },
     logger?: Logger
@@ -97,7 +97,7 @@ export class AxiosInterceptorManager {
           // Detectar errores de autenticación (401)
           if (status === 401) {
             if (!this.onTokenRefresh) {
-              this.handleSessionInvalid(status);
+              await this.handleSessionInvalid(status);
               return Promise.reject(error);
             }
 
@@ -139,7 +139,7 @@ export class AxiosInterceptorManager {
             } catch (refreshError) {
               this.logger.error('AxiosInterceptor: Token refresh failed:', refreshError);
               this.processQueue(refreshError as Error, null);
-              this.handleSessionInvalid(status);
+              await this.handleSessionInvalid(status);
               return Promise.reject(refreshError);
             } finally {
               this.isRefreshing = false;
@@ -182,11 +182,9 @@ export class AxiosInterceptorManager {
   /**
    * Manejar sesión inválida
    */
-  private handleSessionInvalid(status: number): void {
+  private async handleSessionInvalid(status: number): Promise<void> {
     this.logger.warn(`AxiosInterceptor: Session invalid (HTTP ${status}), triggering logout`);
-
-    // Llamar callback de sesión inválida
-    this.onSessionInvalid();
+    await this.onSessionInvalid();
   }
 
   /**

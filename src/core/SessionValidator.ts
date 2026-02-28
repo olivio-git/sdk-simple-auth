@@ -166,6 +166,10 @@ export class SessionValidator {
       }
     } catch (error) {
       this.logger.error('SessionValidator: Validation error:', error);
+      // Update activity time to prevent hammering the server on consecutive
+      // validation failures (e.g. network errors). Next trigger will retry
+      // after the normal inactivity threshold.
+      this.lastActivityTime = now;
     }
   }
 

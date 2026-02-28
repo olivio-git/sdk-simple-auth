@@ -169,6 +169,7 @@ export class RefreshManager {
       } else {
         this.logger.error('Max retries exceeded, stopping refresh attempts');
         this.refreshAttempts = 0;
+        this.onRefreshError?.(error as Error);
       }
 
       throw error;

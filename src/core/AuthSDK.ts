@@ -645,25 +645,23 @@ export class AuthSDK {
             this.logger.debug('Session validation listeners started');
           }
 
-          // NUEVO: Validar sesión al inicio si está habilitado
+          // Validar sesión al inicio — awaited para que `ready` garantice
+          // que el estado es consistente antes de que el consumidor continúe
           if (this.config.sessionValidation.validateOnStartup) {
             this.logger.debug('Performing startup session validation...');
-            // No esperamos a que termine para no bloquear la UI inicial, pero
-            // si falla, cerrará la sesión
-            this.validateSession().then(isValid => {
+            try {
+              const isValid = await this.validateSession();
               if (!isValid) {
-                this.logger.warn('Startup session validation failed, logging out');
-                // El logout ya se maneja dentro de validateSession si autoLogoutOnInvalid es true
-                // pero por seguridad forzamos si no lo es
+                this.logger.warn('Startup session validation failed');
                 if (!this.config.sessionValidation.autoLogoutOnInvalid) {
-                   this.clearSession();
+                  await this.clearSession();
                 }
               } else {
                 this.logger.debug('Startup session validation successful');
               }
-            }).catch(err => {
+            } catch (err) {
               this.logger.error('Error during startup session validation:', err);
-            });
+            }
           }
 
           // console.debug('Session restored from storage');
