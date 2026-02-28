@@ -95,3 +95,5 @@ npm run build
 git push && git push --tags
 npm publish         # triggers prepublishOnly → npm run build
 ```
+
+NO PONER Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com> EN LOS COMMITS

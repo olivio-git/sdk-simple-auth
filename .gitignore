@@ -67,6 +67,9 @@ temp/
 *.tsbuildinfo
 .tsbuildinfo
 
+# === Compiled JS inside src/ (source is TypeScript, not JS) ===
+src/**/*.js
+
 # === Testing ===
 .jest/
 jest.config.js.bak
@@ -135,3 +138,4 @@ verify_build.js
 AXIOS_INTERCEPTORS.md
 SESSION_VALIDATION.md
 DESARROLLO.md
+commands.md
