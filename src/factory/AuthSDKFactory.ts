@@ -1,4 +1,5 @@
 import { AuthSDK } from '../core/AuthSDK';
+import { Logger } from '../core/Logger';
 import { AuthConfig } from '../types';
 import { EnhancedAuthConfig, BACKEND_PRESETS, ResponseAnalysis, BackendPresets } from '../types/enhanced_types';
 
@@ -38,8 +39,7 @@ export class AuthSDKFactory {
       },
     };
 
-    console.log(`🏭 Creating AuthSDK for backend: ${backendType}`);
-    console.log(`🔧 Configuration:`, config);
+    Logger.debug(`Creating AuthSDK for backend: ${backendType}`);
 
     return new AuthSDK(config);
   }
@@ -48,9 +48,8 @@ export class AuthSDKFactory {
    * Crear AuthSDK con configuración completamente personalizada
    */
   static createCustom(config: AuthConfig): AuthSDK {
-    console.log('🏭 Creating custom AuthSDK');
-    console.log('🔧 Custom configuration:', config);
-    
+    Logger.debug('Creating custom AuthSDK');
+
     return new AuthSDK(config);
   }
 
@@ -58,7 +57,7 @@ export class AuthSDKFactory {
    * Analizar respuesta de API para detectar estructura
    */
   static analyzeResponse(response: any): ResponseAnalysis {
-    console.log('🔍 Analyzing API response structure...');
+    Logger.debug('Analyzing API response structure...');
     
     const analysis: ResponseAnalysis = {
       backendType: 'unknown',
@@ -129,7 +128,7 @@ export class AuthSDKFactory {
     // Generar recomendaciones
     analysis.recommendations = this.generateRecommendations(analysis);
 
-    console.log('📊 Analysis completed:', analysis);
+    Logger.debug('Analysis completed:', analysis);
     return analysis;
   }
 
@@ -176,8 +175,8 @@ export class AuthSDKFactory {
    */
   static generateCustomConfig(response: any, baseUrl: string): AuthConfig {
     const analysis = this.analyzeResponse(response);
-    
-    console.log('🏗️ Generating custom configuration based on analysis...');
+
+    Logger.debug('Generating custom configuration based on analysis...');
     
     const config: AuthConfig = {
       authServiceUrl: baseUrl,
@@ -194,7 +193,7 @@ export class AuthSDKFactory {
       }
     };
     
-    console.log('🔧 Generated config:', config);
+    Logger.debug('Generated config:', config);
     return config;
   }
 
@@ -279,17 +278,17 @@ export function createJWTStandardAuth(baseUrl: string, customConfig?: Partial<Au
  * Auto-detectar y crear AuthSDK basado en una respuesta de ejemplo
  */
 export function createAutoDetectAuth(sampleResponse: any, baseUrl: string): AuthSDK {
-  console.log('🤖 Auto-detecting backend type from sample response...');
-  
+  Logger.debug('Auto-detecting backend type from sample response...');
+
   const analysis = AuthSDKFactory.analyzeResponse(sampleResponse);
-  
+
   if (analysis.backendType !== 'unknown') {
-    console.log(`🎯 Detected: ${analysis.backendType}`);
+    Logger.debug(`Detected: ${analysis.backendType}`);
     return AuthSDKFactory.create(analysis.backendType as keyof BackendPresets, {
       authServiceUrl: baseUrl
     });
   } else {
-    console.log('🔧 Generating custom configuration...');
+    Logger.debug('Generating custom configuration...');
     const customConfig = AuthSDKFactory.generateCustomConfig(sampleResponse, baseUrl);
     return AuthSDKFactory.createCustom(customConfig);
   }
@@ -332,7 +331,7 @@ export function testBackendResponse(response: any, verbose: boolean = true): voi
  * Crear configuración de desarrollo con logging extendido
  */
 export function createDevAuth(backendType: keyof typeof BACKEND_PRESETS = 'node-express', baseUrl: string = 'http://localhost:3000'): AuthSDK {
-  console.log('🛠️ Creating development AuthSDK with extended logging...');
+  Logger.debug('Creating development AuthSDK with extended logging...');
   
   const auth = AuthSDKFactory.create(backendType, {
     authServiceUrl: baseUrl

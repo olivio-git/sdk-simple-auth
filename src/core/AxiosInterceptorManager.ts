@@ -1,3 +1,5 @@
+import { Logger } from './Logger';
+
 /**
  * AxiosInterceptorManager - Gestiona interceptores de Axios para inyección automática
  * de tokens y manejo de errores de autenticación
@@ -47,7 +49,7 @@ export class AxiosInterceptorManager {
 
     // Verificar que sea una instancia de Axios válida
     if (!this.isAxiosInstance(this.axiosInstance)) {
-      console.warn('AxiosInterceptorManager: Invalid Axios instance provided');
+      Logger.warn('AxiosInterceptorManager: Invalid Axios instance provided');
       return;
     }
 
@@ -62,11 +64,11 @@ export class AxiosInterceptorManager {
               // Solo inyectar si no hay Authorization header ya configurado
               if (!config.headers.Authorization) {
                 config.headers.Authorization = `Bearer ${token}`;
-                console.debug('AxiosInterceptor: Token injected automatically');
+                Logger.debug('AxiosInterceptor: Token injected automatically');
               }
             }
           } catch (error) {
-            console.error('AxiosInterceptor: Error getting access token:', error);
+            Logger.error('AxiosInterceptor: Error getting access token:', error);
           }
 
           return config;
@@ -76,7 +78,7 @@ export class AxiosInterceptorManager {
         }
       );
 
-      console.debug('AxiosInterceptor: Request interceptor configured');
+      Logger.debug('AxiosInterceptor: Request interceptor configured');
     }
 
     // Response interceptor - Manejar errores de autenticación
@@ -98,7 +100,7 @@ export class AxiosInterceptorManager {
 
             if (this.isRefreshing) {
               // Si ya se está refrescando, encolar la petición
-              console.debug('AxiosInterceptor: Refresh in progress, queuing request');
+              Logger.debug('AxiosInterceptor: Refresh in progress, queuing request');
               return new Promise((resolve, reject) => {
                 this.failedQueue.push({ resolve, reject });
               })
@@ -112,7 +114,7 @@ export class AxiosInterceptorManager {
             }
 
             this.isRefreshing = true;
-            console.debug('AxiosInterceptor: Authentication error (401), starting refresh...');
+            Logger.debug('AxiosInterceptor: Authentication error (401), starting refresh...');
 
             try {
               await this.onTokenRefresh();
@@ -122,7 +124,7 @@ export class AxiosInterceptorManager {
                 throw new Error('No token available after refresh');
               }
 
-              console.debug('AxiosInterceptor: Token refreshed successfully');
+              Logger.debug('AxiosInterceptor: Token refreshed successfully');
               
               // Procesar cola con el nuevo token
               this.processQueue(null, newToken);
@@ -132,7 +134,7 @@ export class AxiosInterceptorManager {
               return this.axiosInstance.request(originalRequest);
 
             } catch (refreshError) {
-              console.error('AxiosInterceptor: Token refresh failed:', refreshError);
+              Logger.error('AxiosInterceptor: Token refresh failed:', refreshError);
               this.processQueue(refreshError as Error, null);
               this.handleSessionInvalid(status);
               return Promise.reject(refreshError);
@@ -143,7 +145,7 @@ export class AxiosInterceptorManager {
 
           // Otros errores de autenticación (403, 422) que no requieren refresh
           if (status === 422 || status === 403) {
-             console.warn(`AxiosInterceptor: Auth error (${status}), checking session...`);
+             Logger.warn(`AxiosInterceptor: Auth error (${status}), checking session...`);
              // Opcional: Podríamos validar sesión aquí también
           }
 
@@ -151,17 +153,17 @@ export class AxiosInterceptorManager {
         }
       );
 
-      console.debug('AxiosInterceptor: Response interceptor configured');
+      Logger.debug('AxiosInterceptor: Response interceptor configured');
     }
 
-    console.log('✅ Axios interceptors configured successfully');
+    Logger.debug('Axios interceptors configured successfully');
   }
 
   /**
    * Procesar cola de peticiones fallidas
    */
   private processQueue(error: Error | null, token: string | null = null): void {
-    console.debug(`AxiosInterceptor: Processing queue (${this.failedQueue.length} requests)`);
+    Logger.debug(`AxiosInterceptor: Processing queue (${this.failedQueue.length} requests)`);
     
     this.failedQueue.forEach((prom) => {
       if (error) {
@@ -178,7 +180,7 @@ export class AxiosInterceptorManager {
    * Manejar sesión inválida
    */
   private handleSessionInvalid(status: number): void {
-    console.warn(`AxiosInterceptor: Session invalid (HTTP ${status}), triggering logout`);
+    Logger.warn(`AxiosInterceptor: Session invalid (HTTP ${status}), triggering logout`);
 
     // Llamar callback de sesión inválida
     this.onSessionInvalid();
@@ -195,16 +197,16 @@ export class AxiosInterceptorManager {
     if (this.requestInterceptorId !== null) {
       this.axiosInstance.interceptors.request.eject(this.requestInterceptorId);
       this.requestInterceptorId = null;
-      console.debug('AxiosInterceptor: Request interceptor removed');
+      Logger.debug('AxiosInterceptor: Request interceptor removed');
     }
 
     if (this.responseInterceptorId !== null) {
       this.axiosInstance.interceptors.response.eject(this.responseInterceptorId);
       this.responseInterceptorId = null;
-      console.debug('AxiosInterceptor: Response interceptor removed');
+      Logger.debug('AxiosInterceptor: Response interceptor removed');
     }
 
-    console.log('Axios interceptors removed');
+    Logger.debug('Axios interceptors removed');
   }
 
   /**

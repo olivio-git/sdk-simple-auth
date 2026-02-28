@@ -1,4 +1,5 @@
 import {TokenHandler} from "./TokenHandler";
+import { Logger } from './Logger';
 
 // Clase para normalizar fechas de expiración
 class ExpirationHandler {
@@ -39,7 +40,7 @@ class ExpirationHandler {
       }
     }
 
-    console.warn('Could not parse expiration time:', expiresValue);
+    Logger.warn('Could not parse expiration time:', expiresValue);
     return undefined;
   }
 

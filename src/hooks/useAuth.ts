@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthSDK } from '../core/AuthSDK';
+import { Logger } from '../core/Logger';
 import { AuthState, LoginCredentials, RegisterData, AuthTokens } from '../types';
 
 /**
@@ -42,7 +43,7 @@ export function useAuth(authSDK: AuthSDK) {
           });
         }
       } catch (error) {
-        console.error('Error getting session info:', error);
+        Logger.error('Error getting session info:', error);
       }
     };
 
@@ -69,7 +70,7 @@ export function useAuth(authSDK: AuthSDK) {
         
         return user;
       } catch (error) {
-        console.error('Login error in hook:', error);
+        Logger.error('Login error in hook:', error);
         throw error;
       }
     },
@@ -94,7 +95,7 @@ export function useAuth(authSDK: AuthSDK) {
         
         return user;
       } catch (error) {
-        console.error('Registration error in hook:', error);
+        Logger.error('Registration error in hook:', error);
         throw error;
       }
     },
@@ -111,7 +112,7 @@ export function useAuth(authSDK: AuthSDK) {
           setSessionInfo(null);
         }
       } catch (error) {
-        console.error('Logout error in hook:', error);
+        Logger.error('Logout error in hook:', error);
         throw error;
       }
     },
@@ -136,7 +137,7 @@ export function useAuth(authSDK: AuthSDK) {
         
         return tokens;
       } catch (error) {
-        console.error('Token refresh error in hook:', error);
+        Logger.error('Token refresh error in hook:', error);
         throw error;
       }
     },
@@ -161,7 +162,7 @@ export function useAuth(authSDK: AuthSDK) {
         
         return tokens;
       } catch (error) {
-        console.error('Force refresh error in hook:', error);
+        Logger.error('Force refresh error in hook:', error);
         throw error;
       }
     },
@@ -174,7 +175,7 @@ export function useAuth(authSDK: AuthSDK) {
       try {
         return await authSDK.getAuthHeaders();
       } catch (error) {
-        console.error('Error getting auth headers:', error);
+        Logger.error('Error getting auth headers:', error);
         throw error;
       }
     },
@@ -187,7 +188,7 @@ export function useAuth(authSDK: AuthSDK) {
       try {
         return await authSDK.getValidAccessToken();
       } catch (error) {
-        console.error('Error getting valid access token:', error);
+        Logger.error('Error getting valid access token:', error);
         throw error;
       }
     },
@@ -211,7 +212,7 @@ export function useAuth(authSDK: AuthSDK) {
         
         return isAuth;
       } catch (error) {
-        console.error('Error checking auth status:', error);
+        Logger.error('Error checking auth status:', error);
         return false;
       }
     },

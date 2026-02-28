@@ -1,4 +1,5 @@
 import { AuthTokens, AuthUser } from '../types';
+import { Logger } from './Logger';
 
 /**
  * Enhanced TokenExtractor with flexible data preservation
@@ -196,7 +197,7 @@ export class TokenExtractor {
       }
     }
 
-    console.warn('Could not parse expiration time:', expiresValue, typeof expiresValue);
+    Logger.warn('Could not parse expiration time:', expiresValue, typeof expiresValue);
     return undefined;
   }
 
@@ -430,7 +431,7 @@ export class TokenExtractor {
         ...payload
       };
     } catch (error) {
-      console.warn('Error parsing user from JWT:', error);
+      Logger.warn('Error parsing user from JWT:', error);
       return null;
     }
   }

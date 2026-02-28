@@ -1,4 +1,5 @@
 import { AuthTokens, AuthUser } from "../types";
+import { Logger } from './Logger';
 
 export class TokenHandler {
   public static detectTokenType(token: string): 'jwt' | 'sanctum' | 'opaque' {
@@ -72,7 +73,7 @@ export class TokenHandler {
         isValid: payload.exp ? payload.exp > Math.floor(Date.now() / 1000) : true
       };
     } catch (error) {
-      console.error('Error parsing JWT token:', error);
+      Logger.error('Error parsing JWT token:', error);
       return {
         type: 'jwt' as const,
         isValid: false

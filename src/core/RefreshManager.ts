@@ -48,7 +48,7 @@ export class RefreshManager {
    */
   scheduleTokenRefresh(tokens: AuthTokens): void {
     if (!this.config.tokenRefresh.enabled || !tokens.refreshToken) {
-      console.debug('Token refresh disabled or no refresh token available');
+      Logger.debug('Token refresh disabled or no refresh token available');
       return;
     }
 
@@ -61,7 +61,7 @@ export class RefreshManager {
     );
 
     if (!expiresInSeconds) {
-      console.warn('No expiration info available, using default scheduling');
+      Logger.warn('No expiration info available, using default scheduling');
       // Use default scheduling based on token type
       const tokenInfo = TokenHandler.parseToken(tokens.accessToken);
       const defaultExpiration = tokenInfo.type === 'sanctum' ? 24 * 60 * 60 : 60 * 60;
@@ -77,12 +77,12 @@ export class RefreshManager {
     // NUEVO: Validación de tiempo mínimo para evitar refresh inmediato
     const minimumLifetime = this.config.tokenRefresh.minimumTokenLifetime || 300;
     if (expiresInSeconds < minimumLifetime) {
-      console.warn(`Token expires in ${expiresInSeconds}s (less than minimum ${minimumLifetime}s), using grace period`);
+      Logger.warn(`Token expires in ${expiresInSeconds}s (less than minimum ${minimumLifetime}s), using grace period`);
 
       // Usar período de gracia para tokens de corta duración
       const gracePeriod = (this.config.tokenRefresh.gracePeriod || 60) * 1000;
       this.scheduleRefreshTimer(gracePeriod);
-      console.debug(`Token refresh scheduled with grace period in ${gracePeriod / 1000}s`);
+      Logger.debug(`Token refresh scheduled with grace period in ${gracePeriod / 1000}s`);
       return;
     }
 
@@ -98,7 +98,7 @@ export class RefreshManager {
       this.scheduleRefreshTimer(actualWaitTime);
       // console.debug(`Token refresh scheduled in ${Math.floor(actualWaitTime / 1000)}s`);
     } else {
-      console.warn('Token expires very soon, but skipping immediate refresh to avoid loops');
+      Logger.warn('Token expires very soon, but skipping immediate refresh to avoid loops');
     }
   }
 
@@ -112,7 +112,7 @@ export class RefreshManager {
 
     // Prevent multiple simultaneous refreshes
     if (this.isRefreshing && this.refreshPromise) {
-      console.debug('Refresh already in progress, waiting for completion');
+      Logger.debug('Refresh already in progress, waiting for completion');
       return this.refreshPromise;
     }
 
@@ -130,7 +130,7 @@ export class RefreshManager {
 
     // Check retry limit
     if (this.refreshAttempts >= this.config.tokenRefresh.maxRetries!) {
-      console.error('Maximum refresh attempts exceeded, stopping automatic refresh');
+      Logger.error('Maximum refresh attempts exceeded, stopping automatic refresh');
       this.refreshAttempts = 0;
       throw new Error('Maximum refresh attempts exceeded');
     }
@@ -145,26 +145,26 @@ export class RefreshManager {
       this.lastRefreshTime = now;
       return tokens;
     } catch (error) {
-      console.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
+      Logger.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
 
       // NUEVO: Only schedule retry if we haven't exceeded max retries
       if (this.refreshAttempts < this.config.tokenRefresh.maxRetries!) {
         const retryDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
-        console.log(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries!} in ${retryDelay}ms`);
+        Logger.debug(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries!} in ${retryDelay}ms`);
 
         setTimeout(() => {
           // Only retry if we still have a refresh token
           this.storageManager.getStoredTokens().then(tokens => {
             if (tokens?.refreshToken) {
-              this.refreshTokens().catch(console.error);
+              this.refreshTokens().catch((err) => Logger.error('Retry refresh failed:', err));
             } else {
-              console.warn('No refresh token available for retry, stopping attempts');
+              Logger.warn('No refresh token available for retry, stopping attempts');
               this.refreshAttempts = 0;
             }
           });
         }, retryDelay);
       } else {
-        console.error('Max retries exceeded, stopping refresh attempts');
+        Logger.error('Max retries exceeded, stopping refresh attempts');
         this.refreshAttempts = 0;
       }
 
@@ -223,7 +223,7 @@ export class RefreshManager {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
-      console.debug('Refresh timer cleared');
+      Logger.debug('Refresh timer cleared');
     }
   }
 
@@ -286,13 +286,13 @@ export class RefreshManager {
       throw new Error('No refresh token available');
     }
 
-    console.debug('Performing token refresh...');
+    Logger.debug('Performing token refresh...');
 
     try {
       const url = `${this.config.authServiceUrl}${this.config.endpoints.refresh}`;
       const tokenInfo = TokenHandler.parseToken(refreshToken);
 
-      console.debug('Refresh token info:', {
+      Logger.debug('Refresh token info:', {
         type: tokenInfo.type,
         url,
         hasRefreshToken: !!refreshToken,
@@ -303,7 +303,7 @@ export class RefreshManager {
 
       if (tokenInfo.type === 'sanctum') {
         // For Sanctum tokens, send in Authorization header
-        console.debug('Using Sanctum refresh method (Authorization header)');
+        Logger.debug('Using Sanctum refresh method (Authorization header)');
         response = await this.httpClient.post(url, {
           refresh_token: refreshToken,
           refreshToken: refreshToken
@@ -314,7 +314,7 @@ export class RefreshManager {
         });
       } else {
         // For JWT and other tokens, send in body
-        console.debug('Using JWT refresh method (body only)');
+        Logger.debug('Using JWT refresh method (body only)');
         response = await this.httpClient.post(url, {
           refresh_token: refreshToken,
           refreshToken: refreshToken
@@ -334,13 +334,13 @@ export class RefreshManager {
       this.onTokenRefresh?.(newTokens);
       this.onSessionRenewed?.(newTokens);
 
-      console.debug('Token refresh completed successfully');
+      Logger.debug('Token refresh completed successfully');
 
       return newTokens;
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Token refresh failed';
-      console.error('Token refresh failed:', errorMessage);
+      Logger.error('Token refresh failed:', errorMessage);
 
       // Detectar si es un error de autenticación (401, 403)
       const isAuthError = this.isAuthenticationError(error);
@@ -350,7 +350,7 @@ export class RefreshManager {
           errorMessage.includes('inválidos') || errorMessage.includes('invalid') ||
           errorMessage.includes('expired') || errorMessage.includes('requerido') ||
           errorMessage.includes('Unauthorized') || errorMessage.includes('Unauthenticated')) {
-        console.warn('Refresh token invalid or expired, clearing authentication data');
+        Logger.warn('Refresh token invalid or expired, clearing authentication data');
         await this.storageManager.clearAll();
         // Reset refresh attempts to stop retry loops
         this.refreshAttempts = this.config.tokenRefresh.maxRetries!;
@@ -371,7 +371,7 @@ export class RefreshManager {
       // Preserve original refresh token if no new one is provided
       if (!tokens.refreshToken) {
         tokens.refreshToken = originalRefreshToken;
-        console.debug('Using original refresh token (no new token provided)');
+        Logger.debug('Using original refresh token (no new token provided)');
       }
 
       return tokens;
@@ -388,14 +388,14 @@ export class RefreshManager {
   private scheduleRefreshTimer(timeUntilRefresh: number): void {
     try {
       this.refreshTimer = setTimeout(() => {
-        console.debug('Automatic refresh triggered by timer');
+        Logger.debug('Automatic refresh triggered by timer');
         this.refreshTokens().catch((error) => {
-          console.error('Automatic refresh failed:', error);
+          Logger.error('Automatic refresh failed:', error);
           this.onRefreshError?.(error);
         });
       }, timeUntilRefresh);
     } catch (error) {
-      console.error('Error scheduling refresh timer:', error);
+      Logger.error('Error scheduling refresh timer:', error);
     }
   }
 
@@ -418,7 +418,7 @@ export class RefreshManager {
       return timeUntilExpiry < this.config.tokenRefresh.bufferTime!;
 
     } catch (error) {
-      console.error('Error checking refresh metadata:', error);
+      Logger.error('Error checking refresh metadata:', error);
       return false;
     }
   }
@@ -432,7 +432,7 @@ export class RefreshManager {
     this.refreshPromise = null;
     this.refreshAttempts = 0;
     this.lastRefreshTime = 0;
-    console.debug('Refresh manager reset');
+    Logger.debug('Refresh manager reset');
   }
 
   /**

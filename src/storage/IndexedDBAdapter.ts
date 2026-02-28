@@ -1,4 +1,5 @@
 import { StorageAdapter } from "./StorageAdapter";
+import { Logger } from '../core/Logger';
 
 export class IndexedDBAdapter implements StorageAdapter {
   private dbName: string;
@@ -67,7 +68,7 @@ export class IndexedDBAdapter implements StorageAdapter {
         };
       });
     } catch (error) {
-      console.error('Error getting item from IndexedDB:', error);
+      Logger.error('Error getting item from IndexedDB:', error);
       return null;
     }
   }

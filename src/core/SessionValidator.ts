@@ -1,4 +1,5 @@
 import { AuthConfig } from '../types';
+import { Logger } from './Logger';
 
 /**
  * SessionValidator - Maneja la validación automática de sesiones
@@ -40,7 +41,7 @@ export class SessionValidator {
 
     // Solo funciona en entorno browser
     if (typeof window === 'undefined' || typeof document === 'undefined') {
-      console.debug('SessionValidator: Not a browser environment, skipping');
+      Logger.debug('SessionValidator: Not a browser environment, skipping');
       return;
     }
 
@@ -48,23 +49,23 @@ export class SessionValidator {
     if (this.config.validateOnVisibility) {
       this.visibilityListener = () => this.handleVisibilityChange();
       document.addEventListener('visibilitychange', this.visibilityListener);
-      console.debug('SessionValidator: visibilitychange listener added');
+      Logger.debug('SessionValidator: visibilitychange listener added');
     }
 
     // 2. Listener de focus (cuando la ventana obtiene foco)
     if (this.config.validateOnFocus) {
       this.focusListener = () => this.handleWindowFocus();
       window.addEventListener('focus', this.focusListener);
-      console.debug('SessionValidator: focus listener added');
+      Logger.debug('SessionValidator: focus listener added');
     }
 
     // 3. Listener de pageshow (cuando la página se muestra desde caché)
     this.pageShowListener = (event: PageTransitionEvent) => this.handlePageShow(event);
     window.addEventListener('pageshow', this.pageShowListener);
-    console.debug('SessionValidator: pageshow listener added');
+    Logger.debug('SessionValidator: pageshow listener added');
 
     this.isListening = true;
-    console.debug('SessionValidator: Started listening for app lifecycle events');
+    Logger.debug('SessionValidator: Started listening for app lifecycle events');
   }
 
   /**
@@ -92,7 +93,7 @@ export class SessionValidator {
     }
 
     this.isListening = false;
-    console.debug('SessionValidator: Stopped listening for app lifecycle events');
+    Logger.debug('SessionValidator: Stopped listening for app lifecycle events');
   }
 
   /**
@@ -100,10 +101,10 @@ export class SessionValidator {
    */
   private async handleVisibilityChange(): Promise<void> {
     if (document.visibilityState === 'visible') {
-      console.debug('SessionValidator: App became visible');
+      Logger.debug('SessionValidator: App became visible');
       await this.validateIfNeeded('visibility');
     } else {
-      console.debug('SessionValidator: App became hidden');
+      Logger.debug('SessionValidator: App became hidden');
       // Actualizar tiempo de última actividad
       this.lastActivityTime = Date.now();
     }
@@ -113,7 +114,7 @@ export class SessionValidator {
    * Manejar foco de ventana
    */
   private async handleWindowFocus(): Promise<void> {
-    console.debug('SessionValidator: Window gained focus');
+    Logger.debug('SessionValidator: Window gained focus');
     await this.validateIfNeeded('focus');
   }
 
@@ -123,10 +124,10 @@ export class SessionValidator {
   private async handlePageShow(event: PageTransitionEvent): Promise<void> {
     if (event.persisted) {
       // Página restaurada desde cache (usuario usó back button)
-      console.debug('SessionValidator: Page restored from cache');
+      Logger.debug('SessionValidator: Page restored from cache');
       await this.validateIfNeeded('pageshow-cached');
     } else {
-      console.debug('SessionValidator: Page loaded normally');
+      Logger.debug('SessionValidator: Page loaded normally');
       this.lastActivityTime = Date.now();
     }
   }
@@ -138,30 +139,30 @@ export class SessionValidator {
     const now = Date.now();
     const inactiveTime = (now - this.lastActivityTime) / 1000; // en segundos
 
-    console.debug(`SessionValidator: Validation triggered by ${trigger}`);
-    console.debug(`SessionValidator: Inactive for ${Math.floor(inactiveTime)}s (max: ${this.config.maxInactivityTime}s)`);
+    Logger.debug(`SessionValidator: Validation triggered by ${trigger}`);
+    Logger.debug(`SessionValidator: Inactive for ${Math.floor(inactiveTime)}s (max: ${this.config.maxInactivityTime}s)`);
 
     // Solo validar si ha pasado suficiente tiempo de inactividad
     if (inactiveTime < this.config.maxInactivityTime!) {
-      console.debug('SessionValidator: Inactivity time below threshold, skipping validation');
+      Logger.debug('SessionValidator: Inactivity time below threshold, skipping validation');
       this.lastActivityTime = now;
       return;
     }
 
-    console.debug('SessionValidator: Performing session validation...');
+    Logger.debug('SessionValidator: Performing session validation...');
 
     try {
       const isValid = await this.onValidationRequired();
 
       if (isValid) {
-        console.debug('SessionValidator: Session is valid');
+        Logger.debug('SessionValidator: Session is valid');
         this.lastActivityTime = now;
       } else {
-        console.warn('SessionValidator: Session is invalid');
+        Logger.warn('SessionValidator: Session is invalid');
         // El callback ya manejará el logout si autoLogoutOnInvalid está habilitado
       }
     } catch (error) {
-      console.error('SessionValidator: Validation error:', error);
+      Logger.error('SessionValidator: Validation error:', error);
     }
   }
 
@@ -192,7 +193,7 @@ export class SessionValidator {
    * Forzar validación inmediata
    */
   async forceValidation(): Promise<boolean> {
-    console.debug('SessionValidator: Forcing immediate validation');
+    Logger.debug('SessionValidator: Forcing immediate validation');
     try {
       const isValid = await this.onValidationRequired();
       if (isValid) {
@@ -200,7 +201,7 @@ export class SessionValidator {
       }
       return isValid;
     } catch (error) {
-      console.error('SessionValidator: Force validation error:', error);
+      Logger.error('SessionValidator: Force validation error:', error);
       return false;
     }
   }
