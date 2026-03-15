@@ -1,6 +1,7 @@
 import typescript from '@rollup/plugin-typescript';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
+import json from '@rollup/plugin-json';
 import { terser } from 'rollup-plugin-terser';
 
 const external = ['react', 'react-dom'];
@@ -37,6 +38,7 @@ export default [
     },
     external,
     plugins: [
+      json(),
       nodeResolve(commonResolveOptions),
       commonjs({
         include: /node_modules/,
@@ -45,7 +47,7 @@ export default [
       typescript(typescriptOptions),
     ],
   },
-  
+
   // CommonJS build
   {
     input: 'src/index.ts',
@@ -58,6 +60,7 @@ export default [
     },
     external,
     plugins: [
+      json(),
       nodeResolve(commonResolveOptions),
       commonjs({
         include: /node_modules/,
@@ -69,7 +72,7 @@ export default [
       }),
     ],
   },
-  
+
   // UMD build for browsers
   {
     input: 'src/index.ts',
@@ -84,6 +87,7 @@ export default [
     },
     external,
     plugins: [
+      json(),
       nodeResolve(commonResolveOptions),
       commonjs({
         include: /node_modules/,
@@ -118,6 +122,7 @@ export default [
     },
     external,
     plugins: [
+      json(),
       nodeResolve(commonResolveOptions),
       commonjs({
         include: /node_modules/,

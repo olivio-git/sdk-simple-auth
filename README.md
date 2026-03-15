@@ -1,360 +1,242 @@
-# 🔐 SDK Simple Auth
+# sdk-simple-auth
 
-**Universal JavaScript/TypeScript authentication library with multi-backend support**
+[![npm](https://img.shields.io/npm/v/sdk-simple-auth)](https://www.npmjs.com/package/sdk-simple-auth)
+[![License](https://img.shields.io/npm/l/sdk-simple-auth)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-ready-blue)](https://www.typescriptlang.org/)
 
-[![NPM Version](https://img.shields.io/npm/v/sdk-simple-auth.svg)](https://www.npmjs.com/package/sdk-simple-auth)
-[![License](https://img.shields.io/npm/l/sdk-simple-auth.svg)](https://github.com/olivio-git/sdk-simple-auth/blob/main/LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
+Universal JavaScript/TypeScript authentication SDK with multi-backend support, automatic token refresh, and React integration.
 
-## 🚀 **Key Features**
+---
 
-- ✅ **Multi-Backend**: Compatible with Node.js/Express, Laravel Sanctum, standard JWT
-- ✅ **TypeScript**: Full type support and native compatibility
-- ✅ **React Ready**: Hooks and components ready to use
-- ✅ **Auto-detection**: Automatically detects backend type
-- ✅ **Data Preservation**: Maintains all original backend data
-- ✅ **Auto Refresh**: Intelligent token management
-- ✅ **Flexible Storage**: LocalStorage, IndexedDB, memory
-- ✅ **Zero Dependencies**: No heavy external dependencies
+## Features
 
-## 📦 **Installation**
+- **Multi-backend** — works out of the box with Node.js/Express, Laravel Sanctum, and standard JWT
+- **Auto-detection** — analyzes your API response and configures itself automatically
+- **React hook** — `useAuth()` with full state management
+- **Auto token refresh** — refreshes tokens before they expire, configurable buffer time
+- **Encrypted storage** — optional AES-GCM 256-bit encryption at rest
+- **Axios interceptors** — drop-in `AxiosInterceptorManager` for automatic auth headers
+- **Session validation** — `SessionValidator` with expiry tracking and session IDs
+- **Flexible storage** — `localStorage`, `IndexedDB`, or in-memory
+- **TypeScript** — full types, tree-shakeable ESM + CJS + UMD builds
+
+---
+
+## Installation
 
 ```bash
 npm install sdk-simple-auth
 ```
 
-## 🎯 **Quick Start**
+---
 
-### **Basic Configuration**
+## Quick Start
 
-```typescript
-import { AuthSDK } from 'sdk-simple-auth';
-
-const auth = new AuthSDK({
-  authServiceUrl: 'http://localhost:3000'
-});
-
-// Login
-const user = await auth.login({
-  email: 'user@example.com',
-  password: 'my-password'
-});
-
-console.log('Authenticated user:', user);
-```
-
-### **With React**
-
-```jsx
-import React, { useEffect, useState } from 'react';
-import { AuthSDK } from 'sdk-simple-auth';
-
-function App() {
-  const [auth] = useState(() => new AuthSDK({
-    authServiceUrl: process.env.REACT_APP_API_URL
-  }));
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    // Check existing session
-    auth.isAuthenticated().then(isAuth => {
-      if (isAuth) {
-        setUser(auth.getCurrentUser());
-      }
-    });
-
-    // Listen to auth changes
-    const unsubscribe = auth.onAuthStateChanged((state) => {
-      setUser(state.user);
-    });
-
-    return unsubscribe;
-  }, [auth]);
-
-  const handleLogin = async () => {
-    try {
-      const user = await auth.login({
-        email: 'user@example.com',
-        password: 'password'
-      });
-      console.log('Login successful:', user);
-    } catch (error) {
-      console.error('Login error:', error);
-    }
-  };
-
-  return (
-    <div>
-      {user ? (
-        <div>
-          <h1>Hello, {user.name}!</h1>
-          <button onClick={() => auth.logout()}>
-            Logout
-          </button>
-        </div>
-      ) : (
-        <button onClick={handleLogin}>
-          Login
-        </button>
-      )}
-    </div>
-  );
-}
-```
-
-## 🛠️ **Backend Configuration**
-
-### **Node.js/Express**
+### Node.js / Express
 
 ```typescript
 import { createQuickNodeAuth } from 'sdk-simple-auth';
 
 const auth = createQuickNodeAuth('http://localhost:3000');
 
-// Your backend should return:
-// {
-//   "success": true,
-//   "data": {
-//     "user": { "id": 1, "email": "user@test.com", "name": "User" },
-//     "token": "jwt-token-here",
-//     "refreshToken": "refresh-token-here"
-//   }
-// }
+const user = await auth.login({ email: 'user@example.com', password: 'secret' });
 ```
 
-### **Laravel Sanctum**
+### Laravel Sanctum
 
 ```typescript
 import { createQuickSanctumAuth } from 'sdk-simple-auth';
 
 const auth = createQuickSanctumAuth('http://localhost:8000/api');
 
-const user = await auth.login({
-  email: 'user@example.com',
-  password: 'password',
-  device_name: 'my-web-app'
-});
-
-// Compatible with Sanctum responses:
-// {
-//   "user": { "id": 1, "email": "user@test.com", "created_at": "..." },
-//   "token": "1|sanctum-token-here"
-// }
+const user = await auth.login({ email: 'user@example.com', password: 'secret' });
 ```
 
-### **Standard JWT**
+### Auto-detect from response
+
+```typescript
+import { quickAnalyzeAndCreate } from 'sdk-simple-auth';
+
+// Pass a sample response from your API and it configures itself
+const auth = quickAnalyzeAndCreate(sampleApiResponse, 'http://localhost:3000');
+```
+
+### Manual configuration
 
 ```typescript
 import { AuthSDK } from 'sdk-simple-auth';
 
 const auth = new AuthSDK({
   authServiceUrl: 'http://localhost:3000',
-  backend: {
-    type: 'jwt-standard',
-    userSearchPaths: ['user', 'data.user'],
-    fieldMappings: {
-      userId: ['sub', 'id'],
-      email: ['email'],
-      name: ['name', 'username']
-    }
-  }
-});
-```
-
-## 🔧 **Core API**
-
-### **Authentication Methods**
-
-```typescript
-// Login
-const user = await auth.login(credentials);
-
-// Register
-const user = await auth.register(userData);
-
-// Logout
-await auth.logout();
-
-// Check authentication
-const isAuth = await auth.isAuthenticated();
-
-// Get current user
-const user = auth.getCurrentUser();
-
-// Get valid token (with auto refresh)
-const token = await auth.getValidAccessToken();
-
-// Authorization headers
-const headers = await auth.getAuthHeaders();
-// { Authorization: 'Bearer jwt-token' }
-```
-
-### **Token Management**
-
-```typescript
-// Manual refresh
-const newTokens = await auth.refreshTokens();
-
-// Force refresh
-const tokens = await auth.forceRefreshTokens();
-
-// Session information
-const sessionInfo = await auth.getExtendedSessionInfo();
-console.log({
-  isValid: sessionInfo.isValid,
-  expiresIn: sessionInfo.expiresIn,
-  canRefresh: sessionInfo.canRefresh
-});
-```
-
-### **Events and State**
-
-```typescript
-// Listen to state changes
-const unsubscribe = auth.onAuthStateChanged((state) => {
-  console.log('State:', state.isAuthenticated);
-  console.log('User:', state.user);
-  console.log('Loading:', state.loading);
-  console.log('Error:', state.error);
-});
-
-// Get current state
-const state = auth.getState();
-```
-
-## 🏗️ **Advanced Configuration**
-
-### **Complete Configuration**
-
-```typescript
-const auth = new AuthSDK({
-  authServiceUrl: 'http://localhost:3000',
-  
-  // Custom endpoints
   endpoints: {
     login: '/auth/login',
     register: '/auth/register',
     refresh: '/auth/refresh',
     logout: '/auth/logout',
-    profile: '/auth/profile'
   },
-  
-  // Storage configuration
-  storage: {
-    type: 'localStorage', // 'localStorage' | 'indexedDB'
-    tokenKey: 'access_token',
-    refreshTokenKey: 'refresh_token',
-    userKey: 'user_data'
-  },
-  
-  // Auto refresh
-  tokenRefresh: {
-    enabled: true,
-    bufferTime: 900, // Refresh 15 min before expiry (default)
-    maxRetries: 3
-  },
-  
-  // Backend configuration
   backend: {
-    type: 'node-express',
+    type: 'node-express',       // 'node-express' | 'laravel-sanctum' | 'jwt-standard'
     userSearchPaths: ['user', 'data.user'],
     fieldMappings: {
       userId: ['id', 'user_id'],
       email: ['email'],
-      name: ['name', 'full_name']
+      name: ['name', 'full_name'],
     },
-    preserveOriginalData: true
-  }
+  },
+  storage: {
+    type: 'localStorage',       // 'localStorage' | 'indexedDB'
+  },
+  tokenRefresh: {
+    enabled: true,
+    bufferTime: 900,            // Refresh 15 min before expiry
+    maxRetries: 3,
+  },
 });
 ```
-
-## 🧪 **Testing and Debugging**
-
-### **Debug Mode**
-
-```typescript
-// Analyze your API response
-auth.debugResponse(response);
-
-// Debug current token
-auth.debugToken();
-
-// Debug complete session
-auth.debugSession();
-
-// Test data extraction
-auth.testExtraction(mockResponse);
-```
-
-### **Backend Auto-detection**
-
-```typescript
-import { quickAnalyzeAndCreate } from 'sdk-simple-auth';
-
-// Automatically analyzes response and creates SDK
-const auth = quickAnalyzeAndCreate(
-  responseFromYourAPI,
-  'http://localhost:3000'
-);
-```
-
-## 🔒 **Error Handling**
-
-```typescript
-try {
-  const user = await auth.login(credentials);
-} catch (error) {
-  if (error.message.includes('credentials')) {
-    console.log('Invalid credentials');
-  } else if (error.message.includes('network')) {
-    console.log('Network error');
-  } else {
-    console.log('Unknown error:', error.message);
-  }
-}
-
-// Listen to global errors
-auth.onAuthStateChanged((state) => {
-  if (state.error) {
-    console.error('Authentication error:', state.error);
-  }
-});
-```
-
-## 📱 **Compatibility**
-
-- ✅ **Browsers**: Chrome, Firefox, Safari, Edge (ES2018+)
-- ✅ **Node.js**: 14.x, 16.x, 18.x, 20.x
-- ✅ **Frameworks**: React, Vue, Angular, Vanilla JS
-- ✅ **Bundlers**: Webpack, Vite, Rollup, Parcel
-- ✅ **TypeScript**: 4.5+
-
-## 📚 **Documentation**
-
-- 🚀 [Quick Start Guide](docs/getting-started.md)
-- 🔧 [Advanced Configuration](docs/advanced-config.md)
-- 📖 [API Reference](docs/api-reference.md)
-- 🧪 [Complete Examples](examples/)
-- 🐛 [Troubleshooting](docs/troubleshooting.md)
-
-## 🤝 **Contributing**
-
-1. Fork the repository
-2. Create a branch: `git checkout -b feature/new-feature`
-3. Commit: `git commit -am 'Add new feature'`
-4. Push: `git push origin feature/new-feature`
-5. Create Pull Request
-
-## 📄 **License**
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## 🆘 **Support**
-
-- 📚 [Complete documentation](docs/)
-- 🐛 [Report bugs](https://github.com/olivio-git/sdk-simple-auth/issues)
-- 💬 [Discussions](https://github.com/olivio-git/sdk-simple-auth/discussions)
 
 ---
 
-**Developed by [olivio-git](https://github.com/olivio-git)**
+## Core API
+
+```typescript
+// Auth
+await auth.login(credentials)
+await auth.register(userData)
+await auth.logout()
+await auth.isAuthenticated()
+auth.getCurrentUser()
+
+// Tokens
+await auth.getValidAccessToken()
+await auth.getAuthHeaders()       // { Authorization: 'Bearer ...' }
+await auth.refreshTokens()
+await auth.forceRefreshTokens()
+
+// Session
+await auth.getSessionInfo()       // { isValid, refreshAvailable, sessionId }
+await auth.getExtendedSessionInfo()
+
+// State
+auth.getState()
+auth.onAuthStateChanged((state) => { ... })
+
+// Debug
+auth.debugToken()
+auth.debugResponse(response)
+auth.debugSession()
+```
+
+---
+
+## React Hook
+
+```tsx
+import { AuthSDK, useAuth } from 'sdk-simple-auth';
+
+const authSDK = new AuthSDK({ authServiceUrl: 'http://localhost:3000' });
+
+function App() {
+  const {
+    isAuthenticated,
+    user,
+    loading,
+    error,
+    sessionInfo,
+    login,
+    logout,
+    getAuthHeaders,
+  } = useAuth(authSDK);
+
+  if (loading) return <p>Loading...</p>;
+
+  return isAuthenticated ? (
+    <div>
+      <p>Hello, {user?.name}</p>
+      <button onClick={logout}>Logout</button>
+    </div>
+  ) : (
+    <button onClick={() => login({ email: 'user@example.com', password: 'secret' })}>
+      Login
+    </button>
+  );
+}
+```
+
+---
+
+## Axios Interceptors
+
+Automatically attaches auth headers and handles 401 token refresh on every request:
+
+```typescript
+import axios from 'axios';
+import { AuthSDK, AxiosInterceptorManager } from 'sdk-simple-auth';
+
+const auth = new AuthSDK({ authServiceUrl: 'http://localhost:3000' });
+const client = axios.create({ baseURL: 'http://localhost:3000' });
+
+const interceptors = new AxiosInterceptorManager(auth, client);
+interceptors.setup();
+
+// All requests now include Authorization header automatically
+// 401 responses trigger a token refresh and retry
+```
+
+---
+
+## Encrypted Storage
+
+Optional AES-GCM 256-bit encryption for tokens at rest:
+
+```typescript
+import { AuthSDK, EncryptedStorageAdapter } from 'sdk-simple-auth';
+
+const auth = new AuthSDK({
+  authServiceUrl: 'http://localhost:3000',
+  storage: {
+    adapter: new EncryptedStorageAdapter({ key: 'your-encryption-key' }),
+  },
+});
+```
+
+---
+
+## Exports
+
+| Export | Description |
+|--------|-------------|
+| `AuthSDK` | Main class |
+| `useAuth` | React hook |
+| `createQuickNodeAuth(url)` | Factory for Node.js/Express |
+| `createQuickSanctumAuth(url)` | Factory for Laravel Sanctum |
+| `quickAnalyzeAndCreate(response, url)` | Auto-detect backend from response |
+| `AxiosInterceptorManager` | Axios integration |
+| `EncryptedStorageAdapter` | AES-GCM encrypted storage |
+| `LocalStorageAdapter` | localStorage adapter |
+| `IndexedDBAdapter` | IndexedDB adapter |
+| `SessionValidator` | Session validation |
+| `TokenExtractor` | Token parsing utilities |
+| `BACKEND_PRESETS` | Config presets for each backend type |
+
+---
+
+## Compatibility
+
+| Environment | Support |
+|-------------|---------|
+| Browsers | Chrome, Firefox, Safari, Edge (ES2018+) |
+| Node.js | 14, 16, 18, 20+ |
+| React | 16.8+ (hooks) |
+| TypeScript | 4.5+ |
+| Bundlers | Webpack, Vite, Rollup, Parcel |
+| Formats | ESM, CJS, UMD |
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
+
+---
+
+Developed by [Olivio Subelza](https://github.com/olivio-git)
