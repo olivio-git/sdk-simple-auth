@@ -247,4 +247,56 @@ describe('RefreshManager', () => {
       // la implementación del jitter es lo que lo hace verde definitivamente.
     });
   });
+
+  // ─── Bug #12: invalid format response → refresh loop ────────────────────
+
+  describe('invalid refresh response format', () => {
+    test('limpiar storage cuando el servidor devuelve formato inválido', async () => {
+      const http = makeHttpMock();
+      const storage = makeStorageMock();
+
+      // El servidor responde 200 pero con un body que no contiene tokens
+      http.post.mockResolvedValue({ message: 'ok' }); // sin access_token
+
+      const manager = new RefreshManager(
+        makeConfig({ maxRetries: 3 }),
+        storage,
+        http,
+        undefined,
+        silentLogger
+      );
+
+      await expect(manager.refreshTokens()).rejects.toThrow();
+
+      // Con formato inválido, el storage debe limpiarse para evitar
+      // que el timer siga disparando con el mismo refresh token inválido
+      expect(storage.clearAll).toHaveBeenCalled();
+    });
+
+    test('no programar más reintentos tras error de formato inválido', async () => {
+      const http = makeHttpMock();
+      const storage = makeStorageMock();
+      http.post.mockResolvedValue({ message: 'ok' }); // sin tokens
+
+      const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+
+      const manager = new RefreshManager(
+        makeConfig({ maxRetries: 3 }),
+        storage,
+        http,
+        undefined,
+        silentLogger
+      );
+
+      await expect(manager.refreshTokens()).rejects.toThrow();
+
+      // No debe programar retry — el formato inválido no se corregirá solo
+      const retryTimeouts = setTimeoutSpy.mock.calls.filter(
+        ([, delay]) => typeof delay === 'number' && delay > 100
+      );
+      expect(retryTimeouts).toHaveLength(0);
+
+      setTimeoutSpy.mockRestore();
+    });
+  });
 });

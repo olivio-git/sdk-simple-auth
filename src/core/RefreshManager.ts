@@ -353,14 +353,23 @@ export class RefreshManager {
       // Detectar si es un error de autenticación (401, 403)
       const isAuthError = this.isAuthenticationError(error);
 
-      // Si el servidor rechaza el refresh token, limpiar storage
-      if (isAuthError ||
-          errorMessage.includes('inválidos') || errorMessage.includes('invalid') ||
-          errorMessage.includes('expired') || errorMessage.includes('requerido') ||
-          errorMessage.includes('Unauthorized') || errorMessage.includes('Unauthenticated')) {
-        this.logger.warn('Refresh token invalid or expired, clearing authentication data');
+      // Si el servidor rechaza el refresh token, o la respuesta tiene formato inválido
+      // (no retryable — el mismo endpoint siempre devolverá el mismo formato),
+      // limpiar storage y detener reintentos
+      const lowerMessage = errorMessage.toLowerCase();
+      const isNonRetryable =
+        isAuthError ||
+        lowerMessage.includes('invalid') ||
+        lowerMessage.includes('expired') ||
+        lowerMessage.includes('unauthorized') ||
+        lowerMessage.includes('unauthenticated') ||
+        lowerMessage.includes('inválidos') ||
+        lowerMessage.includes('requerido');
+
+      if (isNonRetryable) {
+        this.logger.warn('Non-retryable refresh error, clearing authentication data');
         await this.storageManager.clearAll();
-        // Reset refresh attempts to stop retry loops
+        // Max out attempts to prevent any scheduled retry from firing
         this.refreshAttempts = this.config.tokenRefresh.maxRetries ?? 3;
       }
 
