@@ -65,7 +65,10 @@ export class TokenExtractor {
       }
       // If still at limit after TTL eviction, remove oldest entry
       if (this.searchCache.size >= this.MAX_CACHE_SIZE) {
-        this.searchCache.delete(this.searchCache.keys().next().value!);
+        const firstKey = this.searchCache.keys().next();
+        if (!firstKey.done) {
+          this.searchCache.delete(firstKey.value);
+        }
       }
     }
 
