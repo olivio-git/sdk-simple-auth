@@ -60,6 +60,12 @@ export interface AuthConfig {
     handleAuthErrors?: boolean; // Manejar 401/422 automáticamente
     axiosInstance?: any; // Instancia de Axios (opcional)
   };
+
+  // Multi-tab synchronisation via BroadcastChannel API (browser-only)
+  tabSync?: {
+    enabled?: boolean;      // Enable cross-tab auth state sync (default: false)
+    channelName?: string;   // Shared channel name — use the same value across all SDK instances (default: 'default')
+  };
 }
  
 export interface HttpClient {

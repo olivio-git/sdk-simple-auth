@@ -15,6 +15,8 @@ export { StorageManager } from './core/StorageManager';
 export { RefreshManager } from './core/RefreshManager';
 export { SessionValidator } from './core/SessionValidator';
 export { AxiosInterceptorManager } from './core/AxiosInterceptorManager';
+export { TabSyncManager } from './core/TabSyncManager';
+export type { TabSyncCallbacks } from './core/TabSyncManager';
 
 export type { StorageAdapter } from './storage/StorageAdapter';
  
@@ -99,14 +101,15 @@ export function quickTest(response: any) {
 }
 
 // === VERSION INFO ===
-export const SDK_VERSION = '2.2.0';
+export const SDK_VERSION = '2.3.0';
 export const SDK_FEATURES = {
   multiBackend: true,
   dataPreservation: true,
   autoDetection: true,
   advancedDebugging: true,
   backwardCompatible: true,
-  esmFixed: true
+  esmFixed: true,
+  multiTabSync: true,
 };
 
 // === DEFAULT EXPORT ===

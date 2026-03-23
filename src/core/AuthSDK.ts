@@ -6,6 +6,7 @@ import { Logger } from './Logger';
 import { RefreshManager } from './RefreshManager';
 import { SessionValidator } from './SessionValidator';
 import { StorageManager } from './StorageManager';
+import { TabSyncManager } from './TabSyncManager';
 import { TokenHandler } from './TokenHandler';
 import { TokenExtractor } from './TokenManager';
 
@@ -25,6 +26,7 @@ export class AuthSDK {
   private refreshManager: RefreshManager;
   private sessionValidator: SessionValidator | null = null;
   private axiosInterceptorManager: AxiosInterceptorManager | null = null;
+  private tabSyncManager: TabSyncManager | null = null;
   private authDebugger: AuthDebugger;
 
   // Session management
@@ -89,6 +91,21 @@ export class AuthSDK {
         () => this.validateSession(),
         this.logger
       );
+    }
+
+    // Initialize TabSyncManager if enabled
+    if (this.config.tabSync.enabled && TabSyncManager.isSupported()) {
+      this.tabSyncManager = new TabSyncManager(
+        this.config.tabSync.channelName ?? 'default',
+        {
+          onRemoteLogin: (user, tokens) => this.applyRemoteSession(user, tokens),
+          onRemoteLogout: () => { this.clearSession().then(() => this.callbacks.onLogout?.()); },
+          onRemoteTokenRefresh: (tokens) => this.applyRemoteTokenRefresh(tokens),
+        },
+        this.logger
+      );
+      this.tabSyncManager.start();
+      this.logger.debug(`TabSyncManager: initialized on channel "${this.config.tabSync.channelName}"`);
     }
 
     // Initialize AxiosInterceptorManager if Axios instance is provided
@@ -178,6 +195,10 @@ export class AuthSDK {
         axiosInstance: undefined,
         ...config.interceptors,
       },
+      tabSync: {
+        enabled: config.tabSync?.enabled ?? false,
+        channelName: config.tabSync?.channelName ?? 'default',
+      },
     };
   }
 
@@ -200,6 +221,7 @@ export class AuthSDK {
       }
 
       await this.establishSession(tokens, user);
+      this.tabSyncManager?.broadcastLogin(user, tokens);
 
       this.callbacks.onLogin?.(user, tokens);
       this.logger.debug('Login successful, session established');
@@ -238,6 +260,7 @@ export class AuthSDK {
 
         // If tokens are provided, establish session immediately
         await this.establishSession(tokens, user);
+        this.tabSyncManager?.broadcastLogin(user, tokens);
 
         this.callbacks.onLogin?.(user, tokens);
         this.logger.debug('Registration successful with automatic login');
@@ -292,6 +315,7 @@ export class AuthSDK {
         }
       }
     } finally {
+      this.tabSyncManager?.broadcastLogout();
       await this.clearSession();
       this.callbacks.onLogout?.();
       this.logger.debug('Logout completed, session cleared');
@@ -306,6 +330,7 @@ export class AuthSDK {
   destroy(): void {
     this.sessionValidator?.stopListening();
     this.refreshManager.clearRefreshTimer();
+    this.tabSyncManager?.destroy();
     this.stateChangeListeners = [];
     this.logger.debug('AuthSDK instance destroyed');
   }
@@ -554,6 +579,47 @@ export class AuthSDK {
   }
 
   /**
+   * Apply a session received from another tab via TabSyncManager.
+   * Storage is shared (localStorage / IndexedDB), so we only update in-memory state.
+   */
+  private applyRemoteSession(user: AuthUser, tokens: AuthTokens): void {
+    this.state = {
+      isAuthenticated: true,
+      user,
+      tokens,
+      loading: false,
+      error: null,
+    };
+
+    if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
+      this.refreshManager.scheduleTokenRefresh(tokens);
+    }
+    this.scheduleTokenExpiration(tokens);
+
+    if (this.sessionValidator && !this.sessionValidator.getStatus().isListening) {
+      this.sessionValidator.startListening();
+    }
+
+    this.notifyStateChange();
+    this.logger.debug('TabSyncManager: session applied from another tab');
+  }
+
+  /**
+   * Apply a token refresh received from another tab via TabSyncManager.
+   */
+  private applyRemoteTokenRefresh(tokens: AuthTokens): void {
+    this.state.tokens = tokens;
+    this.scheduleTokenExpiration(tokens);
+
+    if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
+      this.refreshManager.scheduleTokenRefresh(tokens);
+    }
+
+    this.notifyStateChange();
+    this.logger.debug('TabSyncManager: token refresh applied from another tab');
+  }
+
+  /**
    * Detect token format
    */
   private detectTokenFormat(token?: string): 'jwt' | 'opaque' | 'sanctum' | null {
@@ -721,10 +787,8 @@ export class AuthSDK {
    */
   private handleTokenRefresh(tokens: AuthTokens): void {
     this.state.tokens = tokens;
-
-    // Reschedule expiration
     this.scheduleTokenExpiration(tokens);
-
+    this.tabSyncManager?.broadcastTokenRefresh(tokens);
     this.notifyStateChange();
   }
 
