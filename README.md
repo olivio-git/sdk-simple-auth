@@ -120,6 +120,9 @@ await auth.getExtendedSessionInfo()
 auth.getState()
 auth.onAuthStateChanged((state) => { ... })
 
+// Lifecycle
+auth.destroy()                    // stop listeners/timers before discarding instance
+
 // Debug
 auth.debugToken()
 auth.debugResponse(response)
@@ -189,14 +192,21 @@ interceptors.setup();
 Optional AES-GCM 256-bit encryption for tokens at rest:
 
 ```typescript
-import { AuthSDK, EncryptedStorageAdapter } from 'sdk-simple-auth';
+import { AuthSDK, EncryptedStorageAdapter, LocalStorageAdapter } from 'sdk-simple-auth';
 
 const auth = new AuthSDK({
   authServiceUrl: 'http://localhost:3000',
   storage: {
-    adapter: new EncryptedStorageAdapter({ key: 'your-encryption-key' }),
+    type: 'localStorage',
+    encryption: {
+      enabled: true,
+      secret: 'your-unique-secret-key', // use a strong random value in production
+    },
   },
 });
+
+// Or wrap any adapter manually:
+const encrypted = new EncryptedStorageAdapter(new LocalStorageAdapter(), 'your-secret');
 ```
 
 ---
@@ -216,6 +226,7 @@ const auth = new AuthSDK({
 | `IndexedDBAdapter` | IndexedDB adapter |
 | `SessionValidator` | Session validation |
 | `TokenExtractor` | Token parsing utilities |
+| `AuthDebugger` | Debug utilities (token inspection, response analysis) |
 | `BACKEND_PRESETS` | Config presets for each backend type |
 
 ---
@@ -225,7 +236,7 @@ const auth = new AuthSDK({
 | Environment | Support |
 |-------------|---------|
 | Browsers | Chrome, Firefox, Safari, Edge (ES2018+) |
-| Node.js | 14, 16, 18, 20+ |
+| Node.js | 18+ (or provide `httpClient` for older versions) |
 | React | 16.8+ (hooks) |
 | TypeScript | 4.5+ |
 | Bundlers | Webpack, Vite, Rollup, Parcel |
