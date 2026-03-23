@@ -5,6 +5,7 @@
 
 // === CORE EXPORTS ===
 export { AuthSDK } from './core/AuthSDK';
+export { AuthDebugger } from './core/AuthDebugger';
 export { useAuth } from './hooks/useAuth';
 export { LocalStorageAdapter } from './storage/LocalStorageAdapter';
 export { IndexedDBAdapter } from './storage/IndexedDBAdapter';

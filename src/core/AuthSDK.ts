@@ -1,5 +1,6 @@
 import { AuthCallbacks, AuthConfig, AuthState, AuthTokens, AuthUser, ExtendedSessionInfo, HttpClient, LoginCredentials, RegisterData } from '../types';
 import { AxiosInterceptorManager } from './AxiosInterceptorManager';
+import { AuthDebugger } from './AuthDebugger';
 import ExpirationHandler from './ExpirationHandler';
 import { Logger } from './Logger';
 import { RefreshManager } from './RefreshManager';
@@ -24,6 +25,7 @@ export class AuthSDK {
   private refreshManager: RefreshManager;
   private sessionValidator: SessionValidator | null = null;
   private axiosInterceptorManager: AxiosInterceptorManager | null = null;
+  private authDebugger: AuthDebugger;
 
   // Session management
   private expirationTimer: NodeJS.Timeout | null = null;
@@ -56,6 +58,12 @@ export class AuthSDK {
         }
       },
       this.logger
+    );
+
+    this.authDebugger = new AuthDebugger(
+      this.config.debug,
+      () => this.state,
+      () => this.refreshManager.getRefreshStatus()
     );
 
     // Initial state
@@ -462,56 +470,14 @@ export class AuthSDK {
    * Debug token information
    */
   debugToken(token?: string): void {
-    if (!this.config.debug) return;
-    const targetToken = token || this.state.tokens?.accessToken;
-    if (!targetToken) {
-      console.log('No token to debug');
-      return;
-    }
-
-    console.group('🔍 Token Debug Information');
-    const tokenInfo = TokenHandler.parseToken(targetToken);
-    console.log('Token type:', tokenInfo.type);
-    console.log('Token info:', tokenInfo);
-
-    if (tokenInfo.type === 'jwt' && tokenInfo.payload) {
-      console.log('JWT Payload:', tokenInfo.payload);
-      if (tokenInfo.exp) {
-        const expiryDate = new Date(tokenInfo.exp * 1000);
-        const now = new Date();
-        const timeLeft = Math.max(0, Math.floor((expiryDate.getTime() - now.getTime()) / 1000));
-        console.log('Expires at:', expiryDate.toISOString());
-        console.log('Time left:', `${Math.floor(timeLeft / 60)}m ${timeLeft % 60}s`);
-      }
-    }
-
-    console.log('Refresh status:', this.refreshManager.getRefreshStatus());
-    console.groupEnd();
+    this.authDebugger.debugToken(token);
   }
 
   /**
    * Debug API response structure
    */
   debugResponse(response: any): void {
-    if (!this.config.debug) return;
-    console.group('🔍 API Response Debug');
-    TokenExtractor.debugResponse(response);
-
-    try {
-      const tokens = TokenExtractor.extractTokens(response);
-      console.log('✅ Extracted tokens:', tokens);
-    } catch (error) {
-      console.log('❌ Token extraction failed:', error);
-    }
-
-    try {
-      const user = TokenExtractor.extractUser(response);
-      console.log('✅ Extracted user:', user);
-    } catch (error) {
-      console.log('❌ User extraction failed:', error);
-    }
-
-    console.groupEnd();
+    this.authDebugger.debugResponse(response);
   }
 
   /**
@@ -572,29 +538,7 @@ export class AuthSDK {
    * Test extraction with mock response (debugging)
    */
   testExtraction(response: any): void {
-    if (!this.config.debug) return;
-    console.group('🧪 Testing Token and User Extraction');
-    
-    try {
-      console.log('📥 Original response:', response);
-      
-      // Test token extraction
-      console.log('🔑 Testing token extraction...');
-      const tokens = TokenExtractor.extractTokens(response);
-      console.log('✅ Extracted tokens:', tokens);
-      
-      // Test user extraction
-      console.log('👤 Testing user extraction...');
-      const user = TokenExtractor.extractUser(response);
-      console.log('✅ Extracted user:', user);
-      
-      console.log('🎉 Extraction test completed successfully!');
-      
-    } catch (error) {
-      console.error('❌ Extraction test failed:', error);
-    }
-    
-    console.groupEnd();
+    this.authDebugger.testExtraction(response);
   }
 
   /**
@@ -975,24 +919,9 @@ export class AuthSDK {
   }
 
   /**
-   * NUEVO: Debug current session with comprehensive info
+   * Debug current session with comprehensive info
    */
   debugSession(): void {
-    if (!this.config.debug) return;
-    console.group('🔍 Enhanced Session Debug');
-    
-    console.log('📊 Current State:', this.getState());
-    
-    if (this.state.tokens?.accessToken) {
-      this.debugToken(this.state.tokens.accessToken);
-    }
-    
-    if (this.state.user?._originalUserResponse) {
-      console.log('📥 Original User Response:', this.state.user._originalUserResponse);
-    }
-    
-    console.log('🔄 Refresh Status:', this.refreshManager.getRefreshStatus());
-    
-    console.groupEnd();
+    this.authDebugger.debugSession();
   }
 }

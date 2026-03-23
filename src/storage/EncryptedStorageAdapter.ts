@@ -64,6 +64,13 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   private subtle: SubtleCrypto | null;
 
   constructor(inner: StorageAdapter, secret: string = DEFAULT_SECRET) {
+    if (secret === DEFAULT_SECRET) {
+      console.warn(
+        '[sdk-simple-auth] EncryptedStorageAdapter: using the default encryption secret. ' +
+        'Set a unique secret via config.storage.encryption.secret to protect your users\' tokens in production.'
+      );
+    }
+
     this.inner = inner;
     this.subtle = getCrypto();
 
