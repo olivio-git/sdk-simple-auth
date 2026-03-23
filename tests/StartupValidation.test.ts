@@ -56,7 +56,9 @@ describe('Startup Session Validation', () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: false,
       status: 401,
+      statusText: 'Unauthorized',
       json: async () => ({ message: 'Unauthenticated' }),
+      text: async () => JSON.stringify({ message: 'Unauthenticated' }),
     });
 
     // 3. Initialize SDK with validation enabled
@@ -75,10 +77,8 @@ describe('Startup Session Validation', () => {
       }
     });
 
-    // 4. Wait for async validation to complete
-    // initializeFromStorage is async but called in constructor without await.
-    // We need to wait for the promises to settle.
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // 4. Wait for initialization and validation to complete
+    await authSDK.ready;
 
     // 5. Assert session is cleared
     expect(authSDK.getState().isAuthenticated).toBe(false);
@@ -110,13 +110,15 @@ describe('Startup Session Validation', () => {
     });
 
     // 2. Mock fetch to succeed validation (refresh)
+    const refreshBody = {
+      access_token: '1|new_access_token',
+      refresh_token: 'new_refresh_token',
+      expires_in: 3600
+    };
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      json: async () => ({
-        access_token: 'new.jwt.token',
-        refresh_token: 'new_refresh_token',
-        expires_in: 3600
-      }),
+      text: async () => JSON.stringify(refreshBody),
+      json: async () => refreshBody,
     });
 
     // 3. Initialize SDK
@@ -133,15 +135,11 @@ describe('Startup Session Validation', () => {
       }
     });
 
-    // 4. Wait
-    await new Promise(resolve => setTimeout(resolve, 500)); // Increased wait time
-
-    console.log('Final State:', authSDK.getState());
-    console.log('Current User:', authSDK.getCurrentUser());
-    console.log('Access Token:', authSDK.getAccessToken());
+    // 4. Wait for initialization and validation to complete
+    await authSDK.ready;
 
     // 5. Assert session remains valid and updated
     expect(authSDK.getState().isAuthenticated).toBe(true);
-    expect(authSDK.getAccessToken()).toBe('new.jwt.token'); // Should have new token
+    expect(authSDK.getAccessToken()).toBe('1|new_access_token'); // Should have new token
   });
 });

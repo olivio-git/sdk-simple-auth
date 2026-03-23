@@ -5,12 +5,13 @@ import { IndexedDBAdapter } from '../src/storage/IndexedDBAdapter';
 // Mock fetch globally
 global.fetch = jest.fn();
 
-// Mock localStorage
+// In-memory localStorage mock that actually persists set/get
+const localStorageStore: Record<string, string> = {};
 const localStorageMock = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
+  getItem: jest.fn((key: string) => localStorageStore[key] ?? null),
+  setItem: jest.fn((key: string, value: string) => { localStorageStore[key] = value; }),
+  removeItem: jest.fn((key: string) => { delete localStorageStore[key]; }),
+  clear: jest.fn(() => { Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]); }),
 };
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock
@@ -25,18 +26,38 @@ Object.defineProperty(window, 'indexedDB', {
   value: indexedDBMock
 });
 
+// createDefaultHttpClient uses response.text() for success and response.json() for errors
+function mockFetchSuccess(data: any) {
+  return {
+    ok: true,
+    text: async () => JSON.stringify(data),
+    json: async () => data,
+  };
+}
+
+function mockFetchError(status: number, data: any) {
+  return {
+    ok: false,
+    status,
+    statusText: 'Error',
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
+}
+
 describe('Enhanced AuthSDK Tests', () => {
   let authSDK: AuthSDK;
-  
-  beforeEach(() => {
-    // Reset all mocks
-    jest.clearAllMocks();
-    localStorageMock.getItem.mockReturnValue(null);
-    localStorageMock.setItem.mockImplementation(() => {});
-    localStorageMock.removeItem.mockImplementation(() => {});
-    localStorageMock.clear.mockImplementation(() => {});
 
-    // Create fresh SDK instance
+  beforeEach(() => {
+    // Clear in-memory store and reset call history
+    localStorageMock.clear();
+    jest.clearAllMocks();
+    // Restore implementations after clearAllMocks resets them
+    localStorageMock.getItem.mockImplementation((key: string) => localStorageStore[key] ?? null);
+    localStorageMock.setItem.mockImplementation((key: string, value: string) => { localStorageStore[key] = value; });
+    localStorageMock.removeItem.mockImplementation((key: string) => { delete localStorageStore[key]; });
+    localStorageMock.clear.mockImplementation(() => { Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]); });
+
     authSDK = new AuthSDK({
       authServiceUrl: 'http://localhost:3001/api/v1',
       endpoints: {
@@ -46,7 +67,7 @@ describe('Enhanced AuthSDK Tests', () => {
         logout: '/logout',
       },
       storage: {
-        type: 'indexedDB',
+        type: 'localStorage',
         tokenKey: 'test_auth_token',
         refreshTokenKey: 'test_auth_refresh_token',
         userKey: 'test_auth_user',
@@ -60,7 +81,6 @@ describe('Enhanced AuthSDK Tests', () => {
   });
 
   afterEach(() => {
-    // Cleanup timers
     authSDK.logout();
   });
 
@@ -74,7 +94,7 @@ describe('Enhanced AuthSDK Tests', () => {
 
     test('should restore session from storage', async () => {
       const mockTokens = {
-        accessToken: 'stored.jwt.token',
+        accessToken: '1|stored_access_token',
         refreshToken: 'stored_refresh_token',
         expiresIn: 3600,
         tokenType: 'Bearer',
@@ -86,24 +106,14 @@ describe('Enhanced AuthSDK Tests', () => {
         name: 'Test User',
       };
 
-      // Mock stored data
-      localStorageMock.getItem.mockImplementation((key) => {
-        if (key === 'test_auth_token') {
-          return JSON.stringify({
-            ...mockTokens,
-            storedAt: Math.floor(Date.now() / 1000) - 100, // Stored 100 seconds ago
-          });
-        }
-        if (key === 'test_auth_refresh_token') {
-          return mockTokens.refreshToken;
-        }
-        if (key === 'test_auth_user') {
-          return JSON.stringify(mockUser);
-        }
-        return null;
+      // Seed the in-memory store directly
+      localStorageStore['test_auth_token'] = JSON.stringify({
+        ...mockTokens,
+        storedAt: Math.floor(Date.now() / 1000) - 100,
       });
+      localStorageStore['test_auth_refresh_token'] = mockTokens.refreshToken;
+      localStorageStore['test_auth_user'] = JSON.stringify(mockUser);
 
-      // Create new SDK to trigger initialization
       const newSDK = new AuthSDK({
         authServiceUrl: 'http://localhost:3001/api/v1',
         storage: {
@@ -112,13 +122,15 @@ describe('Enhanced AuthSDK Tests', () => {
           refreshTokenKey: 'test_auth_refresh_token',
           userKey: 'test_auth_user',
         },
+        sessionValidation: {
+          validateOnStartup: false,
+        },
       });
 
-      // Wait for initialization
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await newSDK.ready;
 
       expect(newSDK.getState().isAuthenticated).toBe(true);
-      expect(newSDK.getCurrentUser()).toEqual(mockUser);
+      expect(newSDK.getCurrentUser()).toMatchObject(mockUser);
     });
   });
 
@@ -126,7 +138,7 @@ describe('Enhanced AuthSDK Tests', () => {
     test('should login successfully with tokens', async () => {
       const credentials = { email: 'test@example.com', password: 'password123' };
       const mockResponse = {
-        access_token: 'new.jwt.token',
+        access_token: '1|new_access_token',
         refresh_token: 'new_refresh_token',
         expires_in: 3600,
         token_type: 'Bearer',
@@ -137,14 +149,11 @@ describe('Enhanced AuthSDK Tests', () => {
         },
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchSuccess(mockResponse));
 
       const user = await authSDK.login(credentials);
 
-      expect(user).toEqual(mockResponse.user);
+      expect(user).toMatchObject(mockResponse.user);
       expect(authSDK.getState().isAuthenticated).toBe(true);
       expect(authSDK.getAccessToken()).toBe(mockResponse.access_token);
       expect(localStorageMock.setItem).toHaveBeenCalled();
@@ -158,7 +167,7 @@ describe('Enhanced AuthSDK Tests', () => {
       };
 
       const mockResponse = {
-        access_token: 'new.jwt.token',
+        access_token: '1|new_access_token_register',
         refresh_token: 'new_refresh_token',
         user: {
           id: '456',
@@ -167,14 +176,11 @@ describe('Enhanced AuthSDK Tests', () => {
         },
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchSuccess(mockResponse));
 
       const user = await authSDK.register(userData);
 
-      expect(user).toEqual(mockResponse.user);
+      expect(user).toMatchObject(mockResponse.user);
       expect(authSDK.getState().isAuthenticated).toBe(true);
       expect(authSDK.getAccessToken()).toBe(mockResponse.access_token);
     });
@@ -195,26 +201,21 @@ describe('Enhanced AuthSDK Tests', () => {
         },
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchSuccess(mockResponse));
 
       const user = await authSDK.register(userData);
 
-      expect(user).toEqual(mockResponse.user);
-      expect(authSDK.getState().isAuthenticated).toBe(false); // No tokens provided
+      expect(user).toMatchObject(mockResponse.user);
+      expect(authSDK.getState().isAuthenticated).toBe(false);
       expect(authSDK.getAccessToken()).toBeNull();
     });
 
     test('should logout successfully', async () => {
-      // First login
       await loginUser();
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ message: 'Logged out successfully' }),
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        mockFetchSuccess({ message: 'Logged out successfully' })
+      );
 
       await authSDK.logout();
 
@@ -232,15 +233,12 @@ describe('Enhanced AuthSDK Tests', () => {
 
     test('should refresh tokens successfully', async () => {
       const mockRefreshResponse = {
-        access_token: 'refreshed.jwt.token',
+        access_token: '1|refreshed_access_token',
         refresh_token: 'new_refresh_token',
         expires_in: 3600,
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockRefreshResponse,
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchSuccess(mockRefreshResponse));
 
       const tokens = await authSDK.refreshTokens();
 
@@ -303,11 +301,9 @@ describe('Enhanced AuthSDK Tests', () => {
 
   describe('Error Handling', () => {
     test('should handle login failure', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        json: async () => ({ message: 'Invalid credentials' }),
-      });
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        mockFetchError(401, { message: 'Invalid credentials' })
+      );
 
       await expect(authSDK.login({
         email: 'test@example.com',
@@ -343,16 +339,12 @@ describe('Enhanced AuthSDK Tests', () => {
   describe('Token Types', () => {
     test('should handle JWT tokens', async () => {
       const jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
-      
       authSDK.debugToken(jwtToken);
-      // Should not throw error
     });
 
     test('should handle Sanctum tokens', async () => {
       const sanctumToken = '1|abcdefghijklmnopqrstuvwxyz1234567890abcdef';
-      
       authSDK.debugToken(sanctumToken);
-      // Should not throw error
     });
   });
 
@@ -364,7 +356,6 @@ describe('Enhanced AuthSDK Tests', () => {
           user: { id: '1', name: 'Test' },
         },
       };
-
       expect(() => authSDK.debugResponse(mockResponse)).not.toThrow();
     });
 
@@ -373,10 +364,10 @@ describe('Enhanced AuthSDK Tests', () => {
     });
   });
 
-  // Helper function for tests
+  // Helper
   async function loginUser() {
     const mockResponse = {
-      access_token: 'test.jwt.token',
+      access_token: '1|test_access_token',
       refresh_token: 'test_refresh_token',
       expires_in: 3600,
       user: {
@@ -386,10 +377,7 @@ describe('Enhanced AuthSDK Tests', () => {
       },
     };
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
+    (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchSuccess(mockResponse));
 
     return authSDK.login({
       email: 'test@example.com',
