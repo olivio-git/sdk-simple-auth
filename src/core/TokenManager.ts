@@ -223,7 +223,7 @@ export class TokenExtractor {
   /**
    * Extracción mejorada de tokens con soporte para múltiples formatos
    */
-  static extractTokens(response: unknown): AuthTokens & { _originalTokenResponse?: unknown } {
+  static extractTokens(response: unknown): AuthTokens {
     const accessToken = this.enhancedDeepSearch(response as Record<string, unknown>, this.TOKEN_KEYS);
     const refreshToken = this.enhancedDeepSearch(response as Record<string, unknown>, this.REFRESH_TOKEN_KEYS);
     const tokenType = this.enhancedDeepSearch(response as Record<string, unknown>, this.TOKEN_TYPE_KEYS);
@@ -236,7 +236,7 @@ export class TokenExtractor {
     const expiresIn = this.extractExpirationTime(response as Record<string, unknown>);
     const expiresAt = this.enhancedDeepSearch(response as Record<string, unknown>, ['expires_at', 'expiresAt', 'rt_expires_at']);
 
-    const tokens: AuthTokens & { _originalTokenResponse?: unknown } = {
+    const tokens: AuthTokens = {
       accessToken,
       refreshToken,
       expiresIn,
@@ -259,7 +259,7 @@ export class TokenExtractor {
   /**
    * Extracción flexible de usuario con preservación completa de datos
    */
-  static extractUser(response: unknown): (AuthUser & { _originalUserResponse?: unknown; _backendType?: string }) | null {
+  static extractUser(response: unknown): AuthUser | null {
     const userData = this.deepSearchByPaths(response as Record<string, unknown>, this.USER_SEARCH_PATHS);
 
     if (!userData || typeof userData !== 'object') {
@@ -273,7 +273,7 @@ export class TokenExtractor {
     // Extraer campos estándar con mapeo flexible
     const standardUser = this.mapToStandardUser(userData);
 
-    const enhancedUser: AuthUser & { _originalUserResponse?: unknown; _backendType?: string } = {
+    const enhancedUser: AuthUser = {
       ...standardUser,
       // Preservar campos originales que no están en el mapping
       ...this.preserveUnmappedFields(userData, standardUser),
@@ -386,7 +386,7 @@ export class TokenExtractor {
   /**
    * Construye usuario desde campos dispersos cuando no hay estructura clara
    */
-  private static buildUserFromScatteredFields(response: Record<string, unknown>): (AuthUser & { _originalUserResponse?: unknown; _backendType?: string }) | null {
+  private static buildUserFromScatteredFields(response: Record<string, unknown>): AuthUser | null {
     const id = this.enhancedDeepSearch(response, ['id', '_id', 'user_id', 'userId']);
     const email = this.enhancedDeepSearch(response, ['email', 'user_email', 'userEmail']);
     const name = this.enhancedDeepSearch(response, ['name', 'username', 'user_name', 'fullName']);
