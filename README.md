@@ -17,6 +17,7 @@ Universal JavaScript/TypeScript authentication SDK with multi-backend support, a
 - **Encrypted storage** — optional AES-GCM 256-bit encryption at rest
 - **Axios interceptors** — drop-in `AxiosInterceptorManager` for automatic auth headers
 - **Session validation** — `SessionValidator` with expiry tracking and session IDs
+- **Multi-tab sync** — optional BroadcastChannel sync: login/logout/token-refresh propagated to all open tabs
 - **Flexible storage** — `localStorage`, `IndexedDB`, or in-memory
 - **TypeScript** — full types, tree-shakeable ESM + CJS + UMD builds
 
@@ -208,6 +209,26 @@ const auth = new AuthSDK({
 // Or wrap any adapter manually:
 const encrypted = new EncryptedStorageAdapter(new LocalStorageAdapter(), 'your-secret');
 ```
+
+---
+
+## Multi-Tab Sync
+
+By default, each browser tab manages its auth state independently. Enable `tabSync` to synchronise login/logout/token-refresh events across all tabs of the same origin via the [BroadcastChannel API](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel):
+
+```typescript
+const auth = new AuthSDK({
+  authServiceUrl: 'http://localhost:3000',
+  tabSync: {
+    enabled: true,           // disabled by default — must opt in
+    channelName: 'myapp',    // optional, default: 'default'
+  },
+});
+```
+
+> **Note:** `tabSync` is **opt-in** (`enabled: false` by default). Without it, logging out in one tab will not affect other open tabs.
+
+All tabs must use the same `channelName` for the sync to work. This feature is browser-only — it is automatically skipped in Node.js/SSR environments.
 
 ---
 
