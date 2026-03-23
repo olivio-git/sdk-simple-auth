@@ -121,15 +121,19 @@ export class RefreshManager {
 
     // Check rate limiting
     const now = Date.now();
-    if (now - this.lastRefreshTime < 5000) { // 5 second minimum between refreshes
+    if (this.lastRefreshTime > 0 && now - this.lastRefreshTime < 5000) { // 5 second minimum between refreshes
       throw new Error('Refresh rate limit exceeded');
     }
 
-    // NUEVO: Reset attempts if enough time has passed
-    const timeSinceLastAttempt = now - this.lastRefreshTime;
+    // Reset attempts if enough time has passed since the LAST ATTEMPT (success or failure)
+    const timeSinceLastAttempt = this.lastRefreshTime > 0 ? now - this.lastRefreshTime : Infinity;
     if (timeSinceLastAttempt > 60000) { // 1 minute
       this.refreshAttempts = 0;
     }
+
+    // Record attempt time immediately so rate limit and attempt window work correctly
+    // even when the refresh fails (lastRefreshTime must not stay at 0 after a failure)
+    this.lastRefreshTime = now;
 
     // Check retry limit
     if (this.refreshAttempts >= (this.config.tokenRefresh.maxRetries ?? 3)) {
@@ -145,14 +149,14 @@ export class RefreshManager {
     try {
       const tokens = await this.refreshPromise;
       this.refreshAttempts = 0; // Reset on success
-      this.lastRefreshTime = now;
       return tokens;
     } catch (error) {
       this.logger.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
 
       // NUEVO: Only schedule retry if we haven't exceeded max retries
       if (this.refreshAttempts < (this.config.tokenRefresh.maxRetries ?? 3)) {
-        const retryDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
+        const baseDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
+        const retryDelay = baseDelay + Math.random() * 1000; // Add up to 1s jitter to prevent thundering herd
         this.logger.debug(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries ?? 3} in ${retryDelay}ms`);
 
         setTimeout(() => {
