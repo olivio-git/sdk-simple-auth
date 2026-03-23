@@ -2,8 +2,7 @@
 // TIPOS MEJORADOS PARA SOPORTE FLEXIBLE
 // =============================================
 
-// Re-export tipos existentes para compatibilidad
-export * from './index';
+import type { HttpClient } from './index';
 
 export interface EnhancedAuthConfig {
   authServiceUrl: string;
@@ -71,13 +70,6 @@ export interface BackendConfig {
   fieldMappings: BackendFieldMappings;
   preserveOriginalData: boolean;
   tokenFormat: 'jwt' | 'opaque' | 'mixed';
-}
-
-export interface HttpClient {
-  post(url: string, data?: any, config?: any): Promise<any>;
-  get(url: string, config?: any): Promise<any>;
-  put(url: string, data?: any, config?: any): Promise<any>;
-  delete(url: string, config?: any): Promise<any>;
 }
 
 // MEJORADO: AuthTokens con soporte para metadatos adicionales
@@ -383,11 +375,3 @@ export interface AuthEvent {
   sessionId?: string;
 }
 
-// Para compatibilidad hacia atrás, re-export de tipos básicos con nuevos nombres
-export type AuthConfig = EnhancedAuthConfig;
-export type AuthTokens = EnhancedAuthTokens;
-export type AuthUser = EnhancedAuthUser;
-export type AuthState = EnhancedAuthState;
-export type AuthCallbacks = EnhancedAuthCallbacks;
-export type LoginCredentials = EnhancedLoginCredentials;
-export type RegisterData = EnhancedRegisterData;

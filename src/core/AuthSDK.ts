@@ -874,6 +874,13 @@ export class AuthSDK {
    * Create default HTTP client using fetch
    */
   private createDefaultHttpClient(): HttpClient {
+    if (typeof fetch === 'undefined') {
+      throw new Error(
+        '[AuthSDK] fetch is not available in this environment. ' +
+        'In Node.js < 18, provide a custom httpClient (e.g. using axios or node-fetch) via config.httpClient.'
+      );
+    }
+
     const makeRequest = async (url: string, options: RequestInit) => {
       const response = await fetch(url, {
         headers: {
