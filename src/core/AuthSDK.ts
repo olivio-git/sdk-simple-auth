@@ -299,6 +299,18 @@ export class AuthSDK {
   }
 
   /**
+   * Tear down all listeners and timers without clearing auth state.
+   * Call this when the SDK instance is being discarded (e.g. React hot-reload)
+   * to prevent duplicate event listeners on the next instantiation.
+   */
+  destroy(): void {
+    this.sessionValidator?.stopListening();
+    this.refreshManager.clearRefreshTimer();
+    this.stateChangeListeners = [];
+    this.logger.debug('AuthSDK instance destroyed');
+  }
+
+  /**
    * Clear local session without calling backend
    * Useful when the server has already invalidated the session (401/422)
    */

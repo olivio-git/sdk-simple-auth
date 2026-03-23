@@ -99,7 +99,7 @@ export function quickTest(response: any) {
 }
 
 // === VERSION INFO ===
-export const SDK_VERSION = '2.0.0-enhanced-fixed';
+export const SDK_VERSION = '2.2.0';
 export const SDK_FEATURES = {
   multiBackend: true,
   dataPreservation: true,
