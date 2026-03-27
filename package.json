@@ -1,6 +1,6 @@
 {
   "name": "sdk-simple-auth",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Universal JavaScript/TypeScript authentication SDK with multi-backend support, automatic token refresh, and React integration",
   "keywords": [
     "authentication",
@@ -32,6 +32,9 @@
     "name": "Olivio Subelza",
     "email": "subelzaolivitocabezas@gmail.com",
     "url": "https://github.com/olivio-git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "type": "module",
   "main": "dist/index.cjs.js",
