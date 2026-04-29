@@ -22,10 +22,13 @@ export interface AuthConfig {
   };
   tokenRefresh?: {
     enabled?: boolean;
-    bufferTime?: number; // segundos antes de expirar
+    /** Milliseconds before expiration to trigger refresh (default: 900_000 = 15 min) */
+    bufferTime?: number;
     maxRetries?: number;
-    minimumTokenLifetime?: number; // NUEVO: tiempo mínimo de vida del token en segundos
-    gracePeriod?: number; // NUEVO: período de gracia para tokens que expiran rápido
+    minimumTokenLifetime?: number; // tiempo mínimo de vida del token en segundos
+    gracePeriod?: number; // período de gracia para tokens que expiran rápido (segundos)
+    /** Minimum interval between refreshes in milliseconds (default: 60_000 = 1 min). Within this window, returns cached tokens instead of throwing. */
+    minRefreshInterval?: number;
   };
   httpClient?: HttpClient;
   

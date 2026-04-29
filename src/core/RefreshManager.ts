@@ -121,8 +121,12 @@ export class RefreshManager {
 
     // Check rate limiting
     const now = Date.now();
-    if (this.lastRefreshTime > 0 && now - this.lastRefreshTime < 5000) { // 5 second minimum between refreshes
-      throw new Error('Refresh rate limit exceeded');
+    const minInterval = this.config.tokenRefresh.minRefreshInterval ?? 60_000;
+    if (this.lastRefreshTime > 0 && now - this.lastRefreshTime < minInterval) {
+      this.logger.debug('Token recently refreshed, returning cached tokens');
+      const cachedTokens = await this.storageManager.getStoredTokens();
+      if (cachedTokens) return cachedTokens;
+      // No cached tokens available — fall through and perform refresh despite interval
     }
 
     // Reset attempts if enough time has passed since the LAST ATTEMPT (success or failure)
@@ -194,9 +198,10 @@ export class RefreshManager {
     const tokenInfo = TokenHandler.parseToken(token);
 
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
-      const now = Math.floor(Date.now() / 1000);
-      const timeUntilExpiry = tokenInfo.exp - now;
-      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
+      const now = Date.now();
+      const expiresAt = tokenInfo.exp * 1000;
+      const timeUntilExpiry = expiresAt - now;
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900_000);
     }
 
     // For non-JWT tokens, we can't determine synchronously without stored metadata
@@ -215,9 +220,10 @@ export class RefreshManager {
     const tokenInfo = TokenHandler.parseToken(token);
 
     if (tokenInfo.type === 'jwt' && tokenInfo.exp) {
-      const now = Math.floor(Date.now() / 1000);
-      const timeUntilExpiry = tokenInfo.exp - now;
-      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
+      const now = Date.now();
+      const expiresAt = tokenInfo.exp * 1000;
+      const timeUntilExpiry = expiresAt - now;
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900_000);
     }
 
     // For non-JWT tokens, check stored metadata
@@ -257,7 +263,8 @@ export class RefreshManager {
    */
   async forceRefresh(): Promise<AuthTokens> {
     this.clearRefreshTimer();
-    this.refreshAttempts = 0; // Reset attempts for forced refresh
+    this.refreshAttempts = 0;
+    this.lastRefreshTime = 0; // bypass minRefreshInterval
     return this.refreshTokens();
   }
 
@@ -428,11 +435,13 @@ export class RefreshManager {
         return false;
       }
 
-      const now = Math.floor(Date.now() / 1000);
-      const timeElapsed = now - metadata.storedAt;
-      const timeUntilExpiry = storedTokens.expiresIn - timeElapsed;
+      const now = Date.now();
+      const storedAtMs = metadata.storedAt * 1000;
+      const timeElapsed = now - storedAtMs;
+      const expiresInMs = storedTokens.expiresIn * 1000;
+      const timeUntilExpiry = expiresInMs - timeElapsed;
 
-      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900);
+      return timeUntilExpiry < (this.config.tokenRefresh.bufferTime ?? 900_000);
 
     } catch (error) {
       this.logger.error('Error checking refresh metadata:', error);

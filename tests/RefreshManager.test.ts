@@ -25,10 +25,11 @@ function makeConfig(overrides: Partial<AuthConfig['tokenRefresh']> = {}): Requir
     },
     tokenRefresh: {
       enabled: true,
-      bufferTime: 900,
+      bufferTime: 900_000,
       maxRetries: 3,
       minimumTokenLifetime: 300,
       gracePeriod: 60,
+      minRefreshInterval: 100, // small value so 5001ms advances clear the interval in tests
       ...overrides,
     },
     debug: false,
@@ -155,13 +156,13 @@ describe('RefreshManager', () => {
       expect(manager.getRefreshStatus().refreshAttempts).toBe(1);
     });
 
-    test('rate limit bloquea un segundo intento inmediato tras fallo', async () => {
+    test('segundo intento dentro de minRefreshInterval retorna tokens cacheados en vez de tirar error', async () => {
       const http = makeHttpMock();
       const storage = makeStorageMock();
       http.post.mockRejectedValue(new Error('Server error'));
 
       const manager = new RefreshManager(
-        makeConfig(),
+        makeConfig({ minRefreshInterval: 60_000 }), // long interval so immediate retry is blocked
         storage,
         http,
         undefined,
@@ -170,9 +171,11 @@ describe('RefreshManager', () => {
 
       await expect(manager.refreshTokens()).rejects.toThrow();
 
-      // Sin avanzar el tiempo (< 5s) → debe ser bloqueado por rate limit
-      // Esto solo funciona si lastRefreshTime se actualiza en cada intento (incluyendo fallos)
-      await expect(manager.refreshTokens()).rejects.toThrow('Refresh rate limit exceeded');
+      // Dentro del minRefreshInterval → retorna tokens cacheados silenciosamente (no throw)
+      const result = await manager.refreshTokens();
+      expect(result).toEqual(MOCK_TOKENS);
+      // http.post fue llamado solo una vez (el segundo intento no llegó al servidor)
+      expect(http.post).toHaveBeenCalledTimes(1);
     });
 
     test('refreshAttempts se resetea correctamente en éxito', async () => {
