@@ -25,7 +25,7 @@ function makeConfig(overrides: Partial<AuthConfig['tokenRefresh']> = {}): Requir
     },
     tokenRefresh: {
       enabled: true,
-      bufferTime: 900_000,
+      bufferTime: 900_000, // 15 min in ms — matches buildConfig default
       maxRetries: 3,
       minimumTokenLifetime: 300,
       gracePeriod: 60,

@@ -165,7 +165,7 @@ export class AuthSDK {
       },
       tokenRefresh: {
         enabled: true,
-        bufferTime: 900, // 15 minutes
+        bufferTime: 900_000, // 15 minutes in ms
         maxRetries: 3,
         minimumTokenLifetime: 300, // 5 minutos mínimo
         gracePeriod: 60, // 1 minuto de gracia
@@ -341,6 +341,7 @@ export class AuthSDK {
    */
   async clearLocalSession(): Promise<void> {
     this.logger.debug('Clearing local session only (no backend call)');
+    this.tabSyncManager?.broadcastLogout();
     await this.clearSession();
     this.callbacks.onLogout?.();
     this.logger.debug('Local session cleared');
