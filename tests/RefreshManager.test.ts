@@ -312,6 +312,8 @@ describe('isRefreshRejection', () => {
     [{ response: { status: 403 } }, true],
     [new Error('HTTP 401: Unauthorized'), true],
     [new Error('Refresh token inválidos'), true],
+    [new Error('Refresh token inválido'), true],
+    [Object.assign(new Error('Sesión cerrada'), { status: 401, response: { status: 401 } }), true],
     [new Error('Token has expired'), true],
     [new Error('Invalid refresh response format'), true],
     [new TypeError('Failed to fetch'), false],

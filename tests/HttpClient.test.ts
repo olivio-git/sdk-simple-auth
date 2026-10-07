@@ -46,4 +46,23 @@ describe('AuthSDK — default HttpClient', () => {
 
     (global as any).fetch = undefined;
   });
+
+  test('los errores HTTP conservan el status (para distinguir un 401 de un fallo del servidor)', async () => {
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({ message: 'Refresh token inválido' }),
+    });
+    const sdk = new AuthSDK({ ...BASE_CONFIG, tabSync: { enabled: false } });
+    const http = (sdk as any).config.httpClient;
+
+    const error = await http.post('http://localhost:3001/api/refresh', {}).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Refresh token inválido');
+    expect(error.status).toBe(401);
+    expect(error.response).toEqual({ status: 401, data: { message: 'Refresh token inválido' } });
+    sdk.destroy();
+  });
 });

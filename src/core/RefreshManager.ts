@@ -48,7 +48,7 @@ export function isRefreshRejection(error: unknown): boolean {
     // Invalid or expired refresh token, or a response format that will never parse.
     lower.includes('invalid') ||
     lower.includes('expired') ||
-    lower.includes('inválidos') ||
+    lower.includes('inválid') ||
     lower.includes('requerido')
   );
 }

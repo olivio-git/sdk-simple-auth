@@ -1079,10 +1079,15 @@ export class AuthSDK {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({
+        const body = await response.json().catch(() => ({
           message: `HTTP ${response.status}: ${response.statusText}`
         }));
-        throw new Error(error.message || `Request failed with status ${response.status}`);
+        // Keep the HTTP status (same shape as Axios errors): the message alone
+        // does not tell a rejected refresh token from a server failure.
+        throw Object.assign(
+          new Error(body?.message || `Request failed with status ${response.status}`),
+          { status: response.status, response: { status: response.status, data: body } }
+        );
       }
 
       const text = await response.text();
