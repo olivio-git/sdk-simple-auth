@@ -230,6 +230,36 @@ const auth = new AuthSDK({
 
 All tabs must use the same `channelName` for the sync to work. This feature is browser-only — it is automatically skipped in Node.js/SSR environments.
 
+### Several tabs or windows sharing one session
+
+Tabs of the same origin — and the windows of a desktop app (Tauri, Electron) — share the stored session. The SDK keeps that session alive across all of them:
+
+- **One refresh at a time.** Refreshes are coordinated with the [Web Locks API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API). The instance that gets the lock calls the refresh endpoint; the rest find the new tokens in storage and take them without another request. This matters with refresh token rotation: two tabs sending the same refresh token used to get a `401` for one of them, which ended the session everywhere. Without Web Locks, a `401` for a refresh token another tab already rotated is still recognised and does not end the session.
+- **Expired access token on startup.** If the refresh token is still valid (the app was closed or the machine slept), the session is renewed instead of cleared.
+- **Network errors do not end the session.** Only a refresh the server rejects (`401`/`403`, invalid or expired token) logs out. If the network is down when the token expires — e.g. right after waking up, while Wi-Fi reconnects — the session is kept and the next request renews it.
+- **Waking up.** The refresh and expiration timers fire together after a long sleep; the expiration now waits for the refresh in progress instead of logging out.
+
+#### Secondary windows
+
+For auxiliary windows of a desktop app, mark the instance as `secondary`:
+
+```typescript
+const isAuxiliaryWindow = new URLSearchParams(location.search).has('windowId');
+
+const auth = new AuthSDK({
+  authServiceUrl: 'http://localhost:3000',
+  tabSync: { enabled: true, channelName: 'myapp' },
+  instanceRole: isAuxiliaryWindow ? 'secondary' : 'primary',
+});
+```
+
+A secondary instance:
+
+- never refreshes tokens — the primary does, and broadcasts them;
+- never clears the shared storage on its own (expired token on startup, a `401`, a remote logout…), which used to log out the main window too;
+- when its token is missing or expired, asks a primary for the session over `tabSync` and waits up to `tabSync.sessionRequestTimeout` (default `5000` ms);
+- still logs out everywhere on an explicit `logout()`.
+
 ---
 
 ## Exports
