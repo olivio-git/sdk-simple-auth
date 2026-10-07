@@ -3,10 +3,10 @@ import { AxiosInterceptorManager } from './AxiosInterceptorManager';
 import { AuthDebugger } from './AuthDebugger';
 import ExpirationHandler from './ExpirationHandler';
 import { Logger } from './Logger';
-import { RefreshManager } from './RefreshManager';
+import { isRefreshRejection, RefreshManager } from './RefreshManager';
 import { SessionValidator } from './SessionValidator';
 import { StorageManager } from './StorageManager';
-import { TabSyncManager } from './TabSyncManager';
+import { SharedSession, TabSyncManager } from './TabSyncManager';
 import { TokenHandler } from './TokenHandler';
 import { TokenExtractor } from './TokenManager';
 
@@ -36,9 +36,14 @@ export class AuthSDK {
   public readonly ready: Promise<void>;
   private logger: Logger;
 
+  /** Follower instance: never refreshes nor clears the shared storage on its own. */
+  private readonly isSecondary: boolean;
+  private sessionRequest: Promise<boolean> | null = null;
+
   constructor(config: AuthConfig, callbacks?: AuthCallbacks) {
     this.config = this.buildConfig(config);
     this.callbacks = callbacks || {};
+    this.isSecondary = this.config.instanceRole === 'secondary';
 
     // Create per-instance logger
     this.logger = new Logger(this.config.debug || false);
@@ -57,7 +62,12 @@ export class AuthSDK {
         },
         onSessionRenewed: (tokens) => {
           this.callbacks.onTokenRefresh?.(tokens);
-        }
+        },
+        // Another tab or window renewed them: same as receiving its broadcast.
+        onTokensAdopted: (tokens) => {
+          this.applyRemoteTokenRefresh(tokens);
+        },
+        getCurrentTokens: () => this.state?.tokens ?? null,
       },
       this.logger
     );
@@ -101,6 +111,7 @@ export class AuthSDK {
           onRemoteLogin: (user, tokens) => this.applyRemoteSession(user, tokens),
           onRemoteLogout: () => { this.clearSession().then(() => this.callbacks.onLogout?.()); },
           onRemoteTokenRefresh: (tokens) => this.applyRemoteTokenRefresh(tokens),
+          onSessionRequest: () => this.shareSession(),
         },
         this.logger
       );
@@ -120,6 +131,13 @@ export class AuthSDK {
             this.callbacks.onSessionInvalid?.();
           },
           onTokenRefresh: async () => {
+            if (this.isSecondary) {
+              // A secondary does not refresh: it asks the primary for the session.
+              if (!(await this.requestSessionFromPrimary())) {
+                throw new Error('No primary instance answered with a session');
+              }
+              return;
+            }
             await this.refreshTokens();
           }
         },
@@ -170,6 +188,8 @@ export class AuthSDK {
         minimumTokenLifetime: 300, // 5 minutos mínimo
         gracePeriod: 60, // 1 minuto de gracia
         ...config.tokenRefresh,
+        // A secondary instance never refreshes: the primary does it for everyone.
+        ...(config.instanceRole === 'secondary' ? { enabled: false } : {}),
       },
       httpClient: config.httpClient || this.createDefaultHttpClient(),
       debug: config.debug || false,
@@ -198,7 +218,9 @@ export class AuthSDK {
       tabSync: {
         enabled: config.tabSync?.enabled ?? false,
         channelName: config.tabSync?.channelName ?? 'default',
+        sessionRequestTimeout: config.tabSync?.sessionRequestTimeout ?? 5000,
       },
+      instanceRole: config.instanceRole ?? 'primary',
     };
   }
 
@@ -316,7 +338,7 @@ export class AuthSDK {
       }
     } finally {
       this.tabSyncManager?.broadcastLogout();
-      await this.clearSession();
+      await this.clearSession({ explicit: true });
       this.callbacks.onLogout?.();
       this.logger.debug('Logout completed, session cleared');
     }
@@ -330,6 +352,7 @@ export class AuthSDK {
   destroy(): void {
     this.sessionValidator?.stopListening();
     this.refreshManager.clearRefreshTimer();
+    this.clearExpirationTimer();
     this.tabSyncManager?.destroy();
     this.stateChangeListeners = [];
     this.logger.debug('AuthSDK instance destroyed');
@@ -342,7 +365,7 @@ export class AuthSDK {
   async clearLocalSession(): Promise<void> {
     this.logger.debug('Clearing local session only (no backend call)');
     this.tabSyncManager?.broadcastLogout();
-    await this.clearSession();
+    await this.clearSession({ explicit: true });
     this.callbacks.onLogout?.();
     this.logger.debug('Local session cleared');
   }
@@ -445,6 +468,14 @@ export class AuthSDK {
       return true;
 
     } catch (error) {
+      if (!isRefreshRejection(error)) {
+        // Sin red o el servidor falló: no se pudo validar, pero la sesión no
+        // fue rechazada. Cerrarla acá sacaba al usuario al volver de una
+        // suspensión, con el Wi-Fi todavía reconectando.
+        this.logger.warn('Session could not be validated (server unreachable), keeping it:', error);
+        return true;
+      }
+
       this.logger.warn('Session validation failed:', error);
 
       // Si falla el refresh, la sesión es inválida
@@ -467,6 +498,10 @@ export class AuthSDK {
       return null;
     }
 
+    if (this.isSecondary) {
+      return this.getSecondaryAccessToken();
+    }
+
     // If refresh is disabled, return token only if valid
     if (!this.config.tokenRefresh.enabled) {
       const isValid = await this.isTokenValid(this.state.tokens.accessToken);
@@ -475,17 +510,26 @@ export class AuthSDK {
 
     // Check if token should be refreshed using async method for better accuracy
     const shouldRefresh = await this.refreshManager.shouldRefreshTokenAsync(this.state.tokens.accessToken);
-    
-    if (shouldRefresh && await this.refreshManager.canRefresh()) {
+
+    // A refresh already in progress is awaited (refreshTokens reuses it)
+    // instead of answering with the old, possibly expired, token.
+    if (shouldRefresh && await this.refreshManager.hasRefreshToken()) {
       try {
         const tokens = await this.refreshManager.refreshTokens();
-        return tokens.accessToken;
+        if (await this.isTokenValid(tokens.accessToken)) {
+          return tokens.accessToken;
+        }
       } catch (error) {
+        // The current token may still be valid (refresh starts `bufferTime`
+        // before expiry): a failed early refresh must not leave requests
+        // without a token.
         this.logger.error('Failed to refresh token:', error);
-        return null;
       }
     }
 
+    if (!this.state.tokens?.accessToken) {
+      return null;
+    }
     const isValid = await this.isTokenValid(this.state.tokens.accessToken);
     return isValid ? this.state.tokens.accessToken : null;
   }
@@ -616,8 +660,60 @@ export class AuthSDK {
       this.refreshManager.scheduleTokenRefresh(tokens);
     }
 
-    this.notifyStateChange();
+    if (this.isInitialized) this.notifyStateChange();
     this.logger.debug('TabSyncManager: token refresh applied from another tab');
+  }
+
+  /**
+   * Primary side of the session hand-over: answers an instance that has no
+   * valid token (a secondary window, typically) with a current session,
+   * renewing it first if needed.
+   */
+  private async shareSession(): Promise<SharedSession | null> {
+    if (this.isSecondary) return null;
+    await this.ready;
+
+    const accessToken = await this.getValidAccessToken();
+    if (!accessToken || !this.state.user || !this.state.tokens) return null;
+    return { user: this.state.user, tokens: this.state.tokens };
+  }
+
+  /**
+   * Secondary side: asks a primary for the session and applies it. Concurrent
+   * callers share one request. Resolves `false` if no primary answered.
+   */
+  private requestSessionFromPrimary(): Promise<boolean> {
+    if (!this.tabSyncManager) return Promise.resolve(false);
+
+    this.sessionRequest ??= this.tabSyncManager
+      .requestSession(this.config.tabSync.sessionRequestTimeout ?? 5000)
+      .then((session) => {
+        if (!session) return false;
+        this.applyRemoteSession(session.user, session.tokens);
+        return true;
+      })
+      .finally(() => {
+        this.sessionRequest = null;
+      });
+    return this.sessionRequest;
+  }
+
+  /** Access token for a secondary instance, which never refreshes by itself. */
+  private async getSecondaryAccessToken(): Promise<string | null> {
+    const current = this.state.tokens?.accessToken;
+    if (current && await this.isTokenValid(current)) return current;
+
+    // The primary may have renewed without this instance hearing about it.
+    const stored = await this.storageManager.getStoredTokens();
+    if (stored?.accessToken && stored.accessToken !== current && await this.isTokenValid(stored.accessToken)) {
+      this.applyRemoteTokenRefresh(stored);
+      return stored.accessToken;
+    }
+
+    if (await this.requestSessionFromPrimary()) {
+      return this.state.tokens?.accessToken ?? null;
+    }
+    return null;
   }
 
   /**
@@ -636,8 +732,10 @@ export class AuthSDK {
    */
   private async initializeFromStorage(): Promise<void> {
     try {
-      // Migrate storage if needed
-      await this.storageManager.migrateStorage();
+      // Migrate storage if needed (a secondary never writes the shared storage)
+      if (!this.isSecondary) {
+        await this.storageManager.migrateStorage();
+      }
 
       const [storedTokens, storedUser] = await Promise.all([
         this.storageManager.getStoredTokens(),
@@ -649,27 +747,7 @@ export class AuthSDK {
         const isValid = await this.isTokenValid(storedTokens.accessToken);
 
         if (isValid) {
-          this.state = {
-            isAuthenticated: true,
-            user: storedUser,
-            tokens: storedTokens,
-            loading: false,
-            error: null,
-          };
-
-          // Setup refresh if enabled
-          if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
-            this.refreshManager.scheduleTokenRefresh(storedTokens);
-          }
-
-          // Schedule expiration handling
-          this.scheduleTokenExpiration(storedTokens);
-
-          // Start session validation listeners
-          if (this.sessionValidator) {
-            this.sessionValidator.startListening();
-            this.logger.debug('Session validation listeners started');
-          }
+          this.restoreSession(storedUser, storedTokens);
 
           // Validar sesión al inicio — awaited para que `ready` garantice
           // que el estado es consistente antes de que el consumidor continúe
@@ -691,20 +769,80 @@ export class AuthSDK {
           }
 
           // console.debug('Session restored from storage');
+        } else if (this.isSecondary) {
+          // The primary renews it and hands it over. Clearing here used to
+          // wipe the session of every window sharing this storage.
+          if (!(await this.requestSessionFromPrimary())) {
+            this.logger.warn('Stored token expired and no primary instance answered');
+          }
+        } else if (this.config.tokenRefresh.enabled && storedTokens.refreshToken) {
+          await this.restoreExpiredSession(storedUser, storedTokens);
         } else {
           this.logger.debug('Stored token is invalid, clearing storage');
           await this.storageManager.clearAll();
         }
-      } else {
+      } else if (!this.isSecondary) {
         this.logger.debug('No valid session found in storage');
         await this.storageManager.clearAll();
       }
     } catch (error) {
       this.logger.error('Error initializing from storage:', error);
-      await this.storageManager.clearAll();
+      if (!this.isSecondary) {
+        await this.storageManager.clearAll();
+      }
     } finally {
       this.isInitialized = true;
       this.notifyStateChange();
+    }
+  }
+
+  /** Sets an existing session (from storage) as the current one. */
+  private restoreSession(user: AuthUser, tokens: AuthTokens): void {
+    this.state = {
+      isAuthenticated: true,
+      user,
+      tokens,
+      loading: false,
+      error: null,
+    };
+
+    // Setup refresh if enabled
+    if (this.config.tokenRefresh.enabled && tokens.refreshToken) {
+      this.refreshManager.scheduleTokenRefresh(tokens);
+    }
+
+    // Schedule expiration handling
+    this.scheduleTokenExpiration(tokens);
+
+    // Start session validation listeners
+    if (this.sessionValidator) {
+      this.sessionValidator.startListening();
+      this.logger.debug('Session validation listeners started');
+    }
+  }
+
+  /**
+   * The access token expired while the app was closed or the machine slept,
+   * but the refresh token may still be valid: renew before giving up. This
+   * used to clear the storage straight away and send the user to the login.
+   */
+  private async restoreExpiredSession(user: AuthUser, storedTokens: AuthTokens): Promise<void> {
+    this.logger.debug('Stored access token expired, renewing it with the refresh token');
+    try {
+      const tokens = await this.refreshManager.refreshTokens({
+        knownAccessToken: storedTokens.accessToken,
+        retryOnFailure: false,
+      });
+      this.restoreSession(user, tokens);
+      this.logger.debug('Expired session renewed on startup');
+    } catch (error) {
+      if (isRefreshRejection(error)) {
+        // RefreshManager already cleared the storage.
+        this.logger.debug('Refresh token rejected on startup, session ended');
+      } else {
+        // Offline or server down: keep the stored session so a later start can renew it.
+        this.logger.warn('Could not renew the stored session (server unreachable), keeping it:', error);
+      }
     }
   }
 
@@ -747,15 +885,18 @@ export class AuthSDK {
   /**
    * Clear current session completely
    */
-  private async clearSession(): Promise<void> {
+  private async clearSession(options: { explicit?: boolean } = {}): Promise<void> {
     // Stop session validation listeners
     if (this.sessionValidator) {
       this.sessionValidator.stopListening();
       this.logger.debug('Session validation listeners stopped');
     }
 
-    // Clear storage
-    await this.storageManager.clearAll();
+    // Clear storage. A secondary shares it with the primary: only an explicit
+    // logout from it clears the session for everyone.
+    if (options.explicit || !this.isSecondary) {
+      await this.storageManager.clearAll();
+    }
 
     // Clear timers
     this.clearExpirationTimer();
@@ -790,7 +931,8 @@ export class AuthSDK {
     this.state.tokens = tokens;
     this.scheduleTokenExpiration(tokens);
     this.tabSyncManager?.broadcastTokenRefresh(tokens);
-    this.notifyStateChange();
+    // On startup the session is not set yet; `ready` notifies once it is.
+    if (this.isInitialized) this.notifyStateChange();
   }
 
   /**
@@ -820,18 +962,43 @@ export class AuthSDK {
   private async handleTokenExpiration(): Promise<void> {
     this.logger.debug('Token expired, handling expiration...');
 
+    if (this.isSecondary) {
+      // The primary renews: ask it instead of logging every window out.
+      if (!(await this.requestSessionFromPrimary())) {
+        this.logger.warn('Token expired and no primary instance answered; retrying on the next request');
+      }
+      return;
+    }
+
     // Try to refresh if possible
-    if (this.config.tokenRefresh.enabled && await this.refreshManager.canRefresh()) {
+    if (this.config.tokenRefresh.enabled && await this.refreshManager.hasRefreshToken()) {
       try {
+        // Reuses a refresh already in progress. When the machine wakes up, the
+        // refresh timer and this one fire together; the old check ("can
+        // refresh" was false while refreshing) logged out a session that was
+        // being renewed at that very moment.
         await this.refreshManager.refreshTokens();
         this.logger.debug('Token refreshed successfully on expiration');
         return;
       } catch (error) {
-        this.logger.error('Failed to refresh expired token:', error);
+        if (!isRefreshRejection(error)) {
+          // Network or server failure (e.g. Wi-Fi still reconnecting after
+          // waking up): the session is still valid on the server. Keep it;
+          // the next request tries to renew again.
+          this.logger.warn('Could not renew the expired token (server unreachable), keeping the session:', error);
+          return;
+        }
+
+        // The server ended the session. Tell the other tabs, without calling
+        // /logout with a token that is already expired and rejected.
+        this.logger.error('Refresh token rejected on expiration:', error);
+        await this.clearLocalSession();
+        this.callbacks.onTokenExpired?.();
+        return;
       }
     }
 
-    // If refresh fails or is not available, logout
+    // If refresh is not available, logout
     this.logger.debug('Performing automatic logout due to token expiration');
     await this.logout();
     this.callbacks.onTokenExpired?.();

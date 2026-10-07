@@ -299,4 +299,91 @@ describe('TabSyncManager', () => {
       mgr.destroy();
     });
   });
+
+  // ── session hand-over ─────────────────────────────────────────────────────
+  describe('requestSession()', () => {
+    it('resolves with the session another tab answers with', async () => {
+      const requester = makeManager();
+      const responder = makeManager('test', {
+        onSessionRequest: jest.fn().mockResolvedValue({ user: mockUser, tokens: mockNewTokens }),
+      });
+      requester.start();
+      responder.start();
+
+      await expect(requester.requestSession(1000)).resolves.toEqual({ user: mockUser, tokens: mockNewTokens });
+
+      requester.destroy();
+      responder.destroy();
+    });
+
+    it('only the requester receives the answer', async () => {
+      const requester = makeManager();
+      const bystanderCbs = makeCallbacks();
+      const bystander = makeManager('test', bystanderCbs);
+      const responder = makeManager('test', {
+        onSessionRequest: async () => ({ user: mockUser, tokens: mockNewTokens }),
+      });
+      [requester, bystander, responder].forEach((m) => m.start());
+
+      await requester.requestSession(1000);
+
+      expect(bystanderCbs.onRemoteLogin).not.toHaveBeenCalled();
+      expect(bystanderCbs.onRemoteTokenRefresh).not.toHaveBeenCalled();
+      [requester, bystander, responder].forEach((m) => m.destroy());
+    });
+
+    it('resolves null when nobody answers in time', async () => {
+      jest.useFakeTimers();
+      try {
+        const requester = makeManager();
+        const silent = makeManager('test', { onSessionRequest: async () => null });
+        requester.start();
+        silent.start();
+
+        const result = requester.requestSession(500);
+        await jest.advanceTimersByTimeAsync(500);
+
+        await expect(result).resolves.toBeNull();
+        requester.destroy();
+        silent.destroy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('resolves null right away without an open channel', async () => {
+      await expect(makeManager().requestSession(1000)).resolves.toBeNull();
+    });
+
+    it('destroy() settles pending requests with null', async () => {
+      const requester = makeManager();
+      requester.start();
+      const result = requester.requestSession(60_000);
+
+      requester.destroy();
+
+      await expect(result).resolves.toBeNull();
+    });
+
+    it('a failing responder does not answer nor throw', async () => {
+      jest.useFakeTimers();
+      try {
+        const requester = makeManager();
+        const broken = makeManager('test', {
+          onSessionRequest: jest.fn().mockRejectedValue(new Error('boom')),
+        });
+        requester.start();
+        broken.start();
+
+        const result = requester.requestSession(200);
+        await jest.advanceTimersByTimeAsync(200);
+
+        await expect(result).resolves.toBeNull();
+        requester.destroy();
+        broken.destroy();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
 });

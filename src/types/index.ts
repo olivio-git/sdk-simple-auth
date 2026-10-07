@@ -68,7 +68,22 @@ export interface AuthConfig {
   tabSync?: {
     enabled?: boolean;      // Enable cross-tab auth state sync (default: false)
     channelName?: string;   // Shared channel name — use the same value across all SDK instances (default: 'default')
+    /** How long a secondary instance waits for a primary to hand over the session, in ms (default: 5000) */
+    sessionRequestTimeout?: number;
   };
+
+  /**
+   * Role of this instance when several share the same storage (browser tabs,
+   * or the windows of a desktop app).
+   *
+   * - `'primary'` (default): refreshes tokens and owns the shared storage.
+   *   Several primaries coordinate their refreshes with the Web Locks API.
+   * - `'secondary'`: a follower, e.g. an auxiliary window of a desktop app.
+   *   It never refreshes and never clears the shared storage on its own: when
+   *   its token is missing or expired it asks a primary for the session
+   *   (requires `tabSync`). An explicit `logout()` still logs out everywhere.
+   */
+  instanceRole?: 'primary' | 'secondary';
 }
  
 export interface HttpClient {

@@ -4,12 +4,24 @@ import { Logger } from './Logger';
 type TabSyncMessage =
   | { type: 'LOGIN'; tabId: string; user: AuthUser; tokens: AuthTokens }
   | { type: 'LOGOUT'; tabId: string }
-  | { type: 'TOKEN_REFRESHED'; tabId: string; tokens: AuthTokens };
+  | { type: 'TOKEN_REFRESHED'; tabId: string; tokens: AuthTokens }
+  | { type: 'SESSION_REQUEST'; tabId: string; requestId: string }
+  | { type: 'SESSION_RESPONSE'; tabId: string; requestId: string; to: string; user: AuthUser; tokens: AuthTokens };
+
+export interface SharedSession {
+  user: AuthUser;
+  tokens: AuthTokens;
+}
 
 export interface TabSyncCallbacks {
   onRemoteLogin: (user: AuthUser, tokens: AuthTokens) => void;
   onRemoteLogout: () => void;
   onRemoteTokenRefresh: (tokens: AuthTokens) => void;
+  /**
+   * Another instance asks for the current session (e.g. a secondary window
+   * whose token expired). Resolve `null` to stay silent.
+   */
+  onSessionRequest?: () => Promise<SharedSession | null>;
 }
 
 /**
@@ -27,6 +39,7 @@ export interface TabSyncCallbacks {
 export class TabSyncManager {
   private channel: BroadcastChannel | null = null;
   private readonly tabId: string;
+  private readonly pendingRequests = new Map<string, (session: SharedSession | null) => void>();
   private readonly channelName: string;
 
   constructor(
@@ -65,8 +78,29 @@ export class TabSyncManager {
     this.send({ type: 'TOKEN_REFRESHED', tabId: this.tabId, tokens });
   }
 
+  /**
+   * Asks the other instances for the current session. Resolves with the first
+   * answer, or `null` if nobody answers within `timeoutMs`.
+   */
+  requestSession(timeoutMs: number): Promise<SharedSession | null> {
+    if (!this.channel) return Promise.resolve(null);
+
+    const requestId = Math.random().toString(36).slice(2);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => settle(null), timeoutMs);
+      const settle = (session: SharedSession | null) => {
+        clearTimeout(timer);
+        this.pendingRequests.delete(requestId);
+        resolve(session);
+      };
+      this.pendingRequests.set(requestId, settle);
+      this.send({ type: 'SESSION_REQUEST', tabId: this.tabId, requestId });
+    });
+  }
+
   /** Close the channel. Safe to call multiple times. */
   destroy(): void {
+    for (const settle of [...this.pendingRequests.values()]) settle(null);
     if (this.channel) {
       this.channel.close();
       this.channel = null;
@@ -99,6 +133,31 @@ export class TabSyncManager {
       case 'TOKEN_REFRESHED':
         this.callbacks.onRemoteTokenRefresh(message.tokens);
         break;
+      case 'SESSION_REQUEST':
+        void this.answerSessionRequest(message.tabId, message.requestId);
+        break;
+      case 'SESSION_RESPONSE':
+        if (message.to !== this.tabId) return;
+        this.pendingRequests.get(message.requestId)?.({ user: message.user, tokens: message.tokens });
+        break;
+    }
+  }
+
+  private async answerSessionRequest(requesterTabId: string, requestId: string): Promise<void> {
+    if (!this.callbacks.onSessionRequest) return;
+    try {
+      const session = await this.callbacks.onSessionRequest();
+      if (!session) return;
+      this.send({
+        type: 'SESSION_RESPONSE',
+        tabId: this.tabId,
+        requestId,
+        to: requesterTabId,
+        user: session.user,
+        tokens: session.tokens,
+      });
+    } catch (error) {
+      this.logger.warn('TabSyncManager: could not answer a session request', error);
     }
   }
 }
