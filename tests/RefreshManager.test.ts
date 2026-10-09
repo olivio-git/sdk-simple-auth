@@ -1,4 +1,4 @@
-import { RefreshManager } from '../src/core/RefreshManager';
+import { isRefreshRejection, RefreshManager } from '../src/core/RefreshManager';
 import { StorageManager } from '../src/core/StorageManager';
 import { HttpClient, AuthConfig, AuthTokens } from '../src/types';
 import { Logger } from '../src/core/Logger';
@@ -301,5 +301,26 @@ describe('RefreshManager', () => {
 
       setTimeoutSpy.mockRestore();
     });
+  });
+});
+
+// ─── Rejection vs. transient failure ─────────────────────────────────────────
+
+describe('isRefreshRejection', () => {
+  it.each([
+    [{ response: { status: 401 } }, true],
+    [{ response: { status: 403 } }, true],
+    [new Error('HTTP 401: Unauthorized'), true],
+    [new Error('Refresh token inválidos'), true],
+    [new Error('Refresh token inválido'), true],
+    [Object.assign(new Error('Sesión cerrada'), { status: 401, response: { status: 401 } }), true],
+    [new Error('Token has expired'), true],
+    [new Error('Invalid refresh response format'), true],
+    [new TypeError('Failed to fetch'), false],
+    [new Error('Network Error'), false],
+    [Object.assign(new Error('Request failed with status code 503'), { response: { status: 503 } }), false],
+    [new Error('Maximum refresh attempts exceeded'), false],
+  ])('%p → %p', (error, expected) => {
+    expect(isRefreshRejection(error)).toBe(expected);
   });
 });

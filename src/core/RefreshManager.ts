@@ -5,6 +5,54 @@ import { StorageManager } from './StorageManager';
 import TokenExtractor from './TokenExtractor';
 import { TokenHandler } from './TokenHandler';
 
+/** Options for a single refresh call. */
+export interface RefreshOptions {
+  /** Always ask the server, even if another instance already renewed the tokens. */
+  force?: boolean;
+  /**
+   * Access token this instance knew when it decided to refresh. If storage
+   * holds a different, fresh one, another tab or window already renewed it and
+   * it is adopted instead of calling the server again. Defaults to the
+   * instance's current token.
+   */
+  knownAccessToken?: string | null;
+  /** Schedule automatic retries after a network or server error (default: true). */
+  retryOnFailure?: boolean;
+}
+
+/** The part of the Web Locks API used here (not in every TS `lib` target). */
+interface RefreshLockManager {
+  request<T>(name: string, options: { signal?: AbortSignal }, callback: () => Promise<T>): Promise<T>;
+}
+
+/** Longest wait for another tab's refresh before refreshing without the lock. */
+const LOCK_WAIT_TIMEOUT_MS = 30_000;
+
+/**
+ * True when the server rejected the refresh token, so the session is over.
+ * False for network or server failures that may succeed on a later attempt:
+ * those must not end the session (e.g. Wi-Fi still reconnecting after the
+ * machine wakes up).
+ */
+export function isRefreshRejection(error: unknown): boolean {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  if (status === 401 || status === 403) return true;
+
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('401') ||
+    lower.includes('403') ||
+    lower.includes('unauthorized') ||
+    lower.includes('unauthenticated') ||
+    // Invalid or expired refresh token, or a response format that will never parse.
+    lower.includes('invalid') ||
+    lower.includes('expired') ||
+    lower.includes('inválid') ||
+    lower.includes('requerido')
+  );
+}
+
 /**
  * Enhanced RefreshManager with automatic session renewal and retry logic
  */
@@ -24,6 +72,8 @@ export class RefreshManager {
   private onTokenRefresh?: (tokens: AuthTokens) => void;
   private onRefreshError?: (error: Error) => void;
   private onSessionRenewed?: (tokens: AuthTokens) => void;
+  private onTokensAdopted?: (tokens: AuthTokens) => void;
+  private getCurrentTokens?: () => AuthTokens | null;
   private logger: Logger;
 
   constructor(
@@ -34,6 +84,10 @@ export class RefreshManager {
       onTokenRefresh?: (tokens: AuthTokens) => void;
       onRefreshError?: (error: Error) => void;
       onSessionRenewed?: (tokens: AuthTokens) => void;
+      /** Tokens another tab or window renewed, taken from storage without a request. */
+      onTokensAdopted?: (tokens: AuthTokens) => void;
+      /** Tokens this instance currently holds in memory. */
+      getCurrentTokens?: () => AuthTokens | null;
     },
     logger?: Logger
   ) {
@@ -43,6 +97,8 @@ export class RefreshManager {
     this.onTokenRefresh = callbacks?.onTokenRefresh;
     this.onRefreshError = callbacks?.onRefreshError;
     this.onSessionRenewed = callbacks?.onSessionRenewed;
+    this.onTokensAdopted = callbacks?.onTokensAdopted;
+    this.getCurrentTokens = callbacks?.getCurrentTokens;
     this.logger = logger ?? new Logger();
   }
 
@@ -108,7 +164,7 @@ export class RefreshManager {
   /**
    * Perform token refresh with enhanced session management
    */
-  async refreshTokens(): Promise<AuthTokens> {
+  async refreshTokens(options: RefreshOptions = {}): Promise<AuthTokens> {
     if (!this.config.tokenRefresh.enabled) {
       throw new Error('Token refresh is disabled');
     }
@@ -122,7 +178,7 @@ export class RefreshManager {
     // Check rate limiting
     const now = Date.now();
     const minInterval = this.config.tokenRefresh.minRefreshInterval ?? 60_000;
-    if (this.lastRefreshTime > 0 && now - this.lastRefreshTime < minInterval) {
+    if (!options.force && this.lastRefreshTime > 0 && now - this.lastRefreshTime < minInterval) {
       this.logger.debug('Token recently refreshed, returning cached tokens');
       const cachedTokens = await this.storageManager.getStoredTokens();
       if (cachedTokens) return cachedTokens;
@@ -148,7 +204,14 @@ export class RefreshManager {
 
     this.isRefreshing = true;
     this.refreshAttempts++;
-    this.refreshPromise = this.performRefresh();
+    const knownAccessToken =
+      options.knownAccessToken !== undefined
+        ? options.knownAccessToken
+        : this.getCurrentTokens?.()?.accessToken ?? null;
+    // One refresh at a time across every tab and window sharing this storage.
+    this.refreshPromise = this.withRefreshLock(() =>
+      this.performRefresh(knownAccessToken, Boolean(options.force))
+    );
 
     try {
       const tokens = await this.refreshPromise;
@@ -158,7 +221,9 @@ export class RefreshManager {
       this.logger.error(`Refresh attempt ${this.refreshAttempts} failed:`, error);
 
       // NUEVO: Only schedule retry if we haven't exceeded max retries
-      if (this.refreshAttempts < (this.config.tokenRefresh.maxRetries ?? 3)) {
+      if (options.retryOnFailure === false) {
+        this.refreshAttempts = 0;
+      } else if (this.refreshAttempts < (this.config.tokenRefresh.maxRetries ?? 3)) {
         const baseDelay = Math.min(2000 * this.refreshAttempts, 30000); // Cap at 30s
         const retryDelay = baseDelay + Math.random() * 1000; // Add up to 1s jitter to prevent thundering herd
         this.logger.debug(`Scheduling retry ${this.refreshAttempts + 1}/${this.config.tokenRefresh.maxRetries ?? 3} in ${retryDelay}ms`);
@@ -265,40 +330,101 @@ export class RefreshManager {
     this.clearRefreshTimer();
     this.refreshAttempts = 0;
     this.lastRefreshTime = 0; // bypass minRefreshInterval
-    return this.refreshTokens();
+    return this.refreshTokens({ force: true });
   }
 
   /**
-   * Detect if error is an authentication error (401, 403, etc)
+   * Runs `refresh` holding a Web Lock shared by every tab and window of the
+   * origin, so only one of them talks to the refresh endpoint at a time.
+   * Without the lock, instances holding the same tokens schedule their refresh
+   * for the same moment and send the same refresh token: with rotation the
+   * server accepts one and answers 401 to the rest, which used to end the
+   * session everywhere.
+   *
+   * Where the Web Locks API is missing, runs unlocked (previous behaviour);
+   * `performRefresh` still recovers from a 401 caused by another tab.
    */
-  private isAuthenticationError(error: any): boolean {
-    // Check for Axios error format
-    if (error?.response?.status) {
-      const status = error.response.status;
-      return status === 401 || status === 403;
+  private withRefreshLock<T>(refresh: () => Promise<T>): Promise<T> {
+    const locks =
+      typeof navigator !== 'undefined'
+        ? (navigator as Navigator & { locks?: RefreshLockManager }).locks
+        : undefined;
+    if (!locks || typeof locks.request !== 'function') {
+      return refresh();
     }
 
-    // Check for Fetch error (our default httpClient)
-    if (error?.message) {
-      const msg = error.message.toLowerCase();
-      return msg.includes('401') ||
-             msg.includes('403') ||
-             msg.includes('unauthorized') ||
-             msg.includes('unauthenticated');
-    }
+    const storage = this.config.storage;
+    const lockName = `sdk-simple-auth:refresh:${storage.dbName}:${storage.storeName}:${storage.tokenKey}`;
 
-    return false;
+    // Do not wait forever behind a tab whose refresh request hangs.
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const waitTimer = controller ? setTimeout(() => controller.abort(), LOCK_WAIT_TIMEOUT_MS) : null;
+    let acquired = false;
+
+    return Promise.resolve(
+      locks.request(lockName, controller ? { signal: controller.signal } : {}, () => {
+        acquired = true;
+        if (waitTimer) clearTimeout(waitTimer);
+        return refresh();
+      })
+    ).catch((error: unknown) => {
+      if (acquired) throw error;
+      if (waitTimer) clearTimeout(waitTimer);
+      this.logger.warn('Could not acquire the refresh lock, refreshing without it:', error);
+      return refresh();
+    });
+  }
+
+  /** True when a refresh token is stored, regardless of a refresh in progress. */
+  async hasRefreshToken(): Promise<boolean> {
+    if (!this.config.tokenRefresh.enabled) return false;
+    try {
+      const storedTokens = await this.storageManager.getStoredTokens();
+      return Boolean(storedTokens?.refreshToken);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Not due for a refresh: more than `bufferTime` left, or no expiry info. */
+  private isFresh(tokens: AuthTokens): boolean {
+    const remaining = ExpirationHandler.calculateExpiration(
+      tokens.accessToken,
+      tokens.expiresIn,
+      tokens.expiresAt
+    );
+    if (remaining === undefined) return true;
+    return remaining * 1000 > (this.config.tokenRefresh.bufferTime ?? 900_000);
+  }
+
+  /** Takes tokens another instance stored, without calling the server. */
+  private adoptStoredTokens(tokens: AuthTokens): AuthTokens {
+    this.scheduleTokenRefresh(tokens);
+    this.onTokensAdopted?.(tokens);
+    return tokens;
   }
 
   /**
    * Private method to perform the actual refresh
    */
-  private async performRefresh(): Promise<AuthTokens> {
+  private async performRefresh(knownAccessToken: string | null, force: boolean): Promise<AuthTokens> {
+    // Read storage now, holding the lock: another tab or window may have
+    // renewed the tokens while this one waited, or before it noticed.
     const storedTokens = await this.storageManager.getStoredTokens();
     const refreshToken = storedTokens?.refreshToken;
 
     if (!refreshToken) {
       throw new Error('No refresh token available');
+    }
+
+    if (
+      !force &&
+      knownAccessToken &&
+      storedTokens.accessToken !== knownAccessToken &&
+      this.isFresh(storedTokens)
+    ) {
+      this.logger.debug('Tokens already renewed by another tab or window, adopting them');
+      return this.adoptStoredTokens(storedTokens);
     }
 
     this.logger.debug('Performing token refresh...');
@@ -357,23 +483,20 @@ export class RefreshManager {
       const errorMessage = error instanceof Error ? error.message : 'Token refresh failed';
       this.logger.error('Token refresh failed:', errorMessage);
 
-      // Detectar si es un error de autenticación (401, 403)
-      const isAuthError = this.isAuthenticationError(error);
-
       // Si el servidor rechaza el refresh token, o la respuesta tiene formato inválido
       // (no retryable — el mismo endpoint siempre devolverá el mismo formato),
       // limpiar storage y detener reintentos
-      const lowerMessage = errorMessage.toLowerCase();
-      const isNonRetryable =
-        isAuthError ||
-        lowerMessage.includes('invalid') ||
-        lowerMessage.includes('expired') ||
-        lowerMessage.includes('unauthorized') ||
-        lowerMessage.includes('unauthenticated') ||
-        lowerMessage.includes('inválidos') ||
-        lowerMessage.includes('requerido');
+      const isNonRetryable = isRefreshRejection(error);
 
       if (isNonRetryable) {
+        // Rejected because another tab or window already used this refresh
+        // token (rotation) and stored the new pair: that session is alive.
+        const latest = await this.storageManager.getStoredTokens();
+        if (latest?.refreshToken && latest.refreshToken !== refreshToken) {
+          this.logger.debug('Refresh token was rotated by another tab or window, adopting its tokens');
+          return this.adoptStoredTokens(latest);
+        }
+
         this.logger.warn('Non-retryable refresh error, clearing authentication data');
         await this.storageManager.clearAll();
         // Max out attempts to prevent any scheduled retry from firing
